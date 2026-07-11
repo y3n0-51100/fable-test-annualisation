@@ -1,0 +1,129 @@
+rules_version = '2';
+
+// =============================================================================
+// SUIVI ANNUALISATION — Règles de sécurité Firestore
+// =============================================================================
+// Principes :
+//  - Les mots de passe sont gérés par Firebase Authentication : AUCUN secret
+//    n'est stocké dans Firestore (les documents users/ ne contiennent que des
+//    données de profil RH).
+//  - L'identifiant applicatif est la partie locale de l'e-mail technique
+//    (<identifiant>@<AUTH_EMAIL_DOMAIN>, voir js/config.js).
+//  - Le rôle est lu dans le document users/ de l'appelant (pas de custom
+//    claims requis, donc pas de Cloud Function à maintenir).
+//
+// Limite assumée (documentée dans CHOIX_IMPLEMENTATION.md) : la page
+// « Planning Équipe » étant visible par tous, les collections users/ et
+// schedules/ sont lisibles par tout utilisateur authentifié. Pour restreindre
+// davantage (v2), extraire un annuaire public minimal (nom, statut) dans une
+// collection dédiée et fermer users/ aux non-admins.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Fonctions utilitaires ------------------------------------------------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Identifiant applicatif de l'appelant (partie locale de l'e-mail).
+    function callerUsername() {
+      return request.auth.token.email.split('@')[0];
+    }
+
+    function isSelf(username) {
+      return signedIn() && callerUsername() == username;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(callerUsername())).data.role == 'admin';
+    }
+
+    // ---- Fiches collaborateurs -----------------------------------------------
+    // Lecture : tout utilisateur authentifié (nécessaire au planning équipe).
+    // Écriture : admin, ou l'utilisateur lui-même limité à son planning type.
+    match /users/{username} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isSelf(username) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['typePlanning']));
+    }
+
+    // ---- Plannings --------------------------------------------------------------
+    // Lecture : tous (planning équipe). Écriture : soi-même ou admin.
+    match /schedules/{username} {
+      allow read: if signedIn();
+      allow write: if isAdmin() || isSelf(username);
+    }
+
+    // ---- Demandes d'absence et d'emprunt -------------------------------------------
+    // Un collaborateur crée/lit/annule SES demandes ; l'admin gère tout.
+    match /absenceRequests/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == callerUsername());
+      allow create: if signedIn() && request.resource.data.userId == callerUsername();
+      allow update: if isAdmin() ||
+        (signedIn() && resource.data.userId == callerUsername()
+         && request.resource.data.status == 'cancelled'
+         && resource.data.status in ['pending', 'waiting']);
+      allow delete: if isAdmin();
+    }
+
+    match /vanRequests/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == callerUsername());
+      allow create: if signedIn() && request.resource.data.userId == callerUsername();
+      allow update: if isAdmin() ||
+        (signedIn() && resource.data.userId == callerUsername()
+         && request.resource.data.status == 'cancelled'
+         && resource.data.status in ['pending', 'waiting']);
+      allow delete: if isAdmin();
+    }
+
+    // ---- Réglages ---------------------------------------------------------------------
+    match /settings/{doc} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---- Annonces -----------------------------------------------------------------------
+    // Lecture : tous. Écriture : admin, sauf l'acquittement (chaque utilisateur
+    // ne peut modifier que le champ acknowledgedBy).
+    match /announcements/{id} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (signedIn() &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledgedBy']));
+    }
+
+    // ---- Journal d'audit ---------------------------------------------------------------------
+    // Ajout par tout utilisateur authentifié (les actions collaborateur peuvent
+    // être journalisées), lecture réservée à l'admin, jamais de modification.
+    match /auditLog/{id} {
+      allow read: if isAdmin();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    // ---- Sauvegardes -----------------------------------------------------------------------------
+    match /snapshots/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---- Documents RH -------------------------------------------------------------------------------
+    // Chaque collaborateur ne voit que SES documents ; l'admin voit tout.
+    match /documents/{id} {
+      allow read, delete: if isAdmin() || (signedIn() && resource.data.userId == callerUsername());
+      allow create: if isAdmin() || (signedIn() && request.resource.data.userId == callerUsername());
+      allow update: if isAdmin();
+    }
+
+    // ---- Acomptes sur salaire ---------------------------------------------------------------------------
+    match /acomptes/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == callerUsername());
+      allow create: if signedIn() && request.resource.data.userId == callerUsername();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

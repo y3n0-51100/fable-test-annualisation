@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<!-- =========================================================================
+  SUIVI ANNUALISATION — application de gestion de l'annualisation du temps
+  de travail (magasin de détail, France).
+
+  Choix d'architecture : vanilla JS sans étape de build (hébergement statique
+  simple type GitHub Pages / Firebase Hosting, aucune équipe IT requise),
+  mais découpé en modules lisibles (config / logique métier pure / données /
+  UI / pages) plutôt qu'en un fichier monolithique, pour rester maintenable
+  et testable (voir tests/test-core.js).
+
+  Configuration : voir js/config.js (placeholders "À_CONFIGURER") et README.md.
+========================================================================== -->
+<html lang="fr" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Suivi Annualisation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Firebase (SDK compat, chargé uniquement si configuré — voir main.js) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <!-- EmailJS (e-mails transactionnels côté client) -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+  <!-- jsPDF (génération PDF) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- SheetJS (export Excel) -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <!-- pdf.js (prévisualisation / compression de PDF) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+
+  <!-- ======================= Écran de connexion ======================= -->
+  <div id="login-screen">
+    <div class="login-card">
+      <h1>Suivi Annualisation</h1>
+      <p class="subtitle">Gestion du temps de travail annualisé</p>
+      <div id="demo-banner" class="demo-banner" hidden>
+        <strong>Mode démo</strong> — données stockées localement dans ce
+        navigateur. Compte initial : <code>admin</code> / <code>admin123</code>.
+        Configurez Firebase (js/config.js) pour la production.
+      </div>
+      <form id="login-form">
+        <div class="field">
+          <label for="login-username">Identifiant</label>
+          <input class="input" id="login-username" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="login-password">Mot de passe</label>
+          <input class="input" id="login-password" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%">Se connecter</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================= Application ======================= -->
+  <div id="app" hidden>
+    <aside id="sidebar">
+      <div class="sidebar-brand">Suivi Annualisation<small id="brand-role"></small></div>
+      <nav id="sidebar-nav"></nav>
+    </aside>
+    <div id="main">
+      <header id="topbar">
+        <button id="burger" aria-label="Menu">☰</button>
+        <span class="page-title" id="topbar-title"></span>
+        <span id="saving-indicator" class="saving-indicator"></span>
+        <span class="topbar-user" id="topbar-user"></span>
+        <button class="icon-btn" id="theme-toggle" title="Basculer le mode sombre">🌙</button>
+        <button class="icon-btn" id="logout-btn" title="Se déconnecter">⏻</button>
+      </header>
+      <div id="page"></div>
+    </div>
+  </div>
+
+  <div id="toast-container" aria-live="polite"></div>
+  <div id="modal-root"></div>
+
+  <!-- Modules applicatifs (ordre de chargement important) -->
+  <script src="js/config.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/pages-employee.js"></script>
+  <script src="js/pages-admin.js"></script>
+  <script src="js/pages-docs.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
