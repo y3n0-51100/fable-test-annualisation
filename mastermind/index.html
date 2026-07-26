@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#150a2e" />
+  <title>Mastermind — Duel de couleurs</title>
+  <meta name="description" content="Un Mastermind fun, coloré et fluide. Un joueur cache une combinaison, l'autre la découvre. À deux en local ou contre l'ordinateur." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%AF%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Décor animé -->
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+    <span class="orb orb-4"></span>
+  </div>
+
+  <canvas id="confetti" aria-hidden="true"></canvas>
+
+  <header class="topbar">
+    <div class="brand" id="homeBtn" role="button" tabindex="0" title="Retour à l'accueil">
+      <span class="brand-icon">🎯</span>
+      <span class="brand-name">Master<em>mind</em></span>
+    </div>
+    <button id="soundBtn" class="icon-btn" title="Activer / couper le son" aria-label="Son">🔊</button>
+  </header>
+
+  <main id="app">
+
+    <!-- ======================= ÉCRAN ACCUEIL ======================= -->
+    <section class="screen screen--home is-active" id="screen-home">
+      <div class="hero">
+        <h1 class="title">
+          <span class="title-line">Duel de</span>
+          <span class="title-line title-grad">Couleurs</span>
+        </h1>
+        <p class="subtitle">Cache une combinaison secrète, défie ton adversaire de la percer.</p>
+      </div>
+
+      <div class="mode-cards">
+        <button class="mode-card" data-mode="duo">
+          <span class="mode-emoji">👥</span>
+          <span class="mode-title">2 Joueurs</span>
+          <span class="mode-desc">L'un cache, l'autre devine. Sur le même appareil.</span>
+        </button>
+        <button class="mode-card" data-mode="solo">
+          <span class="mode-emoji">🤖</span>
+          <span class="mode-title">Solo</span>
+          <span class="mode-desc">Perce le code généré par l'ordinateur.</span>
+        </button>
+      </div>
+
+      <button class="link-btn" id="rulesBtn">📖 Règles du jeu</button>
+    </section>
+
+    <!-- ======================= ÉCRAN OPTIONS ======================= -->
+    <section class="screen screen--setup" id="screen-setup">
+      <h2 class="screen-title">Réglages de la partie</h2>
+
+      <div class="setup-group">
+        <span class="setup-label">Difficulté</span>
+        <div class="chip-row" id="difficultyRow">
+          <button class="chip" data-diff="facile">Facile</button>
+          <button class="chip is-selected" data-diff="classique">Classique</button>
+          <button class="chip" data-diff="difficile">Difficile</button>
+          <button class="chip" data-diff="expert">Expert</button>
+        </div>
+      </div>
+
+      <div class="setup-summary" id="setupSummary"></div>
+
+      <div class="setup-group">
+        <span class="setup-label">Doublons de couleurs</span>
+        <button class="toggle" id="dupToggle" role="switch" aria-checked="true">
+          <span class="toggle-knob"></span>
+        </button>
+        <span class="setup-hint">Une même couleur peut apparaître plusieurs fois.</span>
+      </div>
+
+      <div class="setup-actions">
+        <button class="btn btn-ghost" data-goto="home">Retour</button>
+        <button class="btn btn-primary" id="startGameBtn">C'est parti →</button>
+      </div>
+    </section>
+
+    <!-- ======================= ÉCRAN CODEUR (mode duo) ======================= -->
+    <section class="screen screen--coder" id="screen-coder">
+      <h2 class="screen-title">Joueur 1 — Compose le code secret</h2>
+      <p class="screen-sub">Choisis une couleur puis touche un emplacement. Personne ne regarde ? 😏</p>
+
+      <div class="secret-slots" id="secretSlots"></div>
+
+      <div class="palette" id="coderPalette"></div>
+
+      <div class="setup-actions">
+        <button class="btn btn-ghost" id="coderClearBtn">Effacer</button>
+        <button class="btn btn-ghost" id="coderRandomBtn">🎲 Aléatoire</button>
+        <button class="btn btn-primary" id="coderConfirmBtn" disabled>Valider le secret →</button>
+      </div>
+    </section>
+
+    <!-- ======================= ÉCRAN PASSAGE D'APPAREIL ======================= -->
+    <section class="screen screen--handoff" id="screen-handoff">
+      <div class="handoff-card">
+        <span class="handoff-emoji">🙈</span>
+        <h2>Code verrouillé&nbsp;!</h2>
+        <p>Passe l'appareil au <strong>Joueur 2</strong>.<br />À lui de percer le mystère.</p>
+        <button class="btn btn-primary" id="handoffBtn">Je suis prêt à deviner →</button>
+      </div>
+    </section>
+
+    <!-- ======================= ÉCRAN DE JEU ======================= -->
+    <section class="screen screen--play" id="screen-play">
+      <div class="play-head">
+        <div class="play-info">
+          <span class="attempts-label">Essai</span>
+          <span class="attempts-count"><b id="attemptCur">1</b> / <span id="attemptMax">10</span></span>
+        </div>
+        <button class="link-btn small" id="hintLegendBtn" title="Que signifient les indices ?">ⓘ Indices</button>
+      </div>
+
+      <div class="board" id="board"></div>
+
+      <div class="current-guess" id="currentGuess"></div>
+
+      <div class="palette" id="playPalette"></div>
+
+      <div class="play-actions">
+        <button class="btn btn-ghost" id="guessClearBtn">Effacer</button>
+        <button class="btn btn-primary" id="guessSubmitBtn" disabled>Valider ✓</button>
+      </div>
+    </section>
+
+    <!-- ======================= ÉCRAN FIN DE PARTIE ======================= -->
+    <section class="screen screen--end" id="screen-end">
+      <div class="end-card">
+        <span class="end-emoji" id="endEmoji">🎉</span>
+        <h2 class="end-title" id="endTitle">Gagné&nbsp;!</h2>
+        <p class="end-text" id="endText"></p>
+        <div class="reveal">
+          <span class="reveal-label">Le code était</span>
+          <div class="secret-slots secret-slots--reveal" id="revealSlots"></div>
+        </div>
+        <div class="setup-actions">
+          <button class="btn btn-ghost" id="endHomeBtn">Accueil</button>
+          <button class="btn btn-primary" id="endReplayBtn">Rejouer ↻</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ======================= MODALE RÈGLES / INDICES ======================= -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button class="modal-close" data-close aria-label="Fermer">✕</button>
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
