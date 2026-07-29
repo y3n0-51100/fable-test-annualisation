@@ -35,12 +35,11 @@ struct ContentView: View {
         """
 
     private static let troubleshootingHelp: String = """
-        Image noire ou verte alors que le compteur de trames monte ? Le \
-        boitier fonctionne, c'est le decodeur analogique qui n'est pas regle. \
-        Dans le Terminal, depuis le dossier du projet :
-          build/dvc100 test
-        puis, s'il annonce des trames vides :
-          scripts/tune.sh
+        Image noire ou verte alors que le compteur de trames monte ? Dans \
+        le Terminal, depuis le dossier du projet :
+          build/dvc100 raw
+        Il montre ce que contiennent vraiment les paquets USB et designe \
+        precisement ou chercher.
         """
 
     private var outputFolder: URL {
@@ -243,9 +242,7 @@ struct ContentView: View {
                         applySettings()
                         if engine.isStreaming { engine.stop() } else { engine.start() }
                     } label: {
-                        Label(engine.isStreaming ? "Arreter l'apercu" : "Demarrer l'apercu",
-                              systemImage: engine.isStreaming ? "stop.fill" : "play.fill")
-                            .frame(maxWidth: .infinity)
+                        previewButtonLabel
                     }
                     .controlSize(.large)
 
@@ -258,9 +255,7 @@ struct ContentView: View {
                             engine.startRecording(to: outputFolder)
                         }
                     } label: {
-                        Label(engine.isRecording ? "Arreter l'enregistrement" : "Enregistrer",
-                              systemImage: engine.isRecording ? "stop.circle.fill" : "record.circle")
-                            .frame(maxWidth: .infinity)
+                        recordButtonLabel
                     }
                     .controlSize(.large)
                     .tint(engine.isRecording ? Color.red : Color.accentColor)
@@ -286,6 +281,25 @@ struct ContentView: View {
             }
             .padding(16)
         }
+    }
+
+    // `Label(_:systemImage:)` a plusieurs surcharges ; lui passer deux
+    // operateurs ternaires directement en arguments force le verificateur de
+    // types a explorer les combinaisons des deux, ce qui peut prendre des
+    // dizaines de minutes sur un compilateur ancien. Precalculer chaque
+    // chaine, typee explicitement, avant l'appel evite le probleme.
+    private var previewButtonLabel: some View {
+        let title: String = engine.isStreaming ? "Arreter l'apercu" : "Demarrer l'apercu"
+        let icon: String = engine.isStreaming ? "stop.fill" : "play.fill"
+        return Label(title, systemImage: icon)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var recordButtonLabel: some View {
+        let title: String = engine.isRecording ? "Arreter l'enregistrement" : "Enregistrer"
+        let icon: String = engine.isRecording ? "stop.circle.fill" : "record.circle"
+        return Label(title, systemImage: icon)
+            .frame(maxWidth: .infinity)
     }
 
     private func section<Content: View>(_ title: String,
