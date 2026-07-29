@@ -1,0 +1,6 @@
+build/
+app/.build/
+app/.swiftpm/
+*.o
+*.mp4
+*.yuv
