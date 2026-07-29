@@ -3,6 +3,10 @@
 Capture de cassettes VHS sur macOS avec un boîtier **Pinnacle/Dazzle DVC100**,
 sans passer par Windows.
 
+> **Vous débutez avec le Terminal ?** Ne lisez pas ce fichier : suivez
+> **[TUTORIEL.md](TUTORIEL.md)**, qui reprend tout pas à pas, de l'ouverture du
+> Terminal jusqu'au fichier vidéo, sans rien supposer connu.
+
 ---
 
 ## Pourquoi aucun logiciel ne fonctionne
