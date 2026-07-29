@@ -30,6 +30,7 @@ de 2 h se numérise en 2 h : c'est le magnétoscope qui donne le rythme).
 7. [Brancher le matériel](#etape-7--brancher-le-materiel)
 8. [Le test de diagnostic (important)](#etape-8--le-test-de-diagnostic-important)
 9. [Lancer l'application et enregistrer](#etape-9--lancer-lapplication-et-enregistrer)
+9 bis. [Enregistrer sans l'application](#etape-9-bis--enregistrer-sans-lapplication)
 10. [Retrouver et lire le fichier](#etape-10--retrouver-et-lire-le-fichier)
 11. [Si ça ne marche pas](#si-ca-ne-marche-pas)
 12. [Les fois suivantes](#les-fois-suivantes)
@@ -184,23 +185,46 @@ cd fable-test-annualisation/dazzle-vhs-mac
 
 ## Étape 6 — Construire le programme
 
-Toujours dans la même fenêtre, copiez-collez :
+Il y a **deux constructions**, indépendantes l'une de l'autre. Faites-les
+l'une après l'autre, pas en même temps.
+
+### 6a. Le pilote (indispensable)
 
 ```bash
-make && make app
+make
 ```
 
-Du texte défile pendant une à deux minutes. À la fin vous devez lire :
+À la fin vous devez lire :
 
 ```
 ==> build/dvc100 construit. Testez : build/dvc100 probe
-...
+```
+
+C'est le morceau important : il contient tout ce qui parle au boîtier. Même
+si l'étape suivante échoue, vous pouvez **déjà numériser vos cassettes** avec
+`scripts/record.sh` (voir l'étape 9 bis).
+
+### 6b. L'application graphique (confort)
+
+```bash
+make app
+```
+
+À la fin :
+
+```
 ==> build/VHSRecorder.app construit. Ouvrez-le avec : open build/VHSRecorder.app
 ```
 
-Si un message d'erreur apparaît à la place, **copiez tout le texte affiché et
-envoyez-le moi** : c'est en général une brique manquante, corrigée en une
-ligne.
+Si un message d'erreur apparaît, lancez :
+
+```bash
+make doctor
+```
+
+et **envoyez-moi ce qu'il affiche** : ce rapport dit exactement quelle brique
+manque sur votre Mac. Pendant ce temps, l'étape 9 bis vous permet d'enregistrer
+sans l'application.
 
 ---
 
@@ -304,6 +328,39 @@ se méfie. Deux solutions :
 
 ---
 
+## Étape 9 bis — Enregistrer sans l'application
+
+Si `make app` a échoué, ou simplement si vous préférez, une seule commande
+suffit — le pilote fait tout le travail, l'application n'était qu'un confort :
+
+```bash
+scripts/record.sh ma-cassette.mp4
+```
+
+Mettez le magnétoscope en lecture **avant** de lancer la commande. Elle
+enregistre jusqu'à ce que vous appuyiez sur **`Ctrl+C`** (la touche Contrôle,
+pas Commande). Le fichier `ma-cassette.mp4` apparaît dans le dossier courant.
+
+Quelques variantes utiles :
+
+```bash
+# Cassette SECAM (si les couleurs manquent en PAL)
+scripts/record.sh -s secam ma-cassette.mp4
+
+# Avec le son : trouvez d'abord le numéro de l'entrée audio
+ffmpeg -f avfoundation -list_devices true -i ""
+# puis, si le boîtier est par exemple le n°1 :
+scripts/record.sh -a 1 ma-cassette.mp4
+
+# Arrêt automatique au bout de 2 h (7200 secondes), sans surveiller
+scripts/record.sh -d 7200 ma-cassette.mp4
+```
+
+Pendant l'enregistrement, une ligne de statistiques défile : tant que le
+nombre de trames augmente, tout va bien.
+
+---
+
 ## Étape 10 — Retrouver et lire le fichier
 
 Le fichier s'appelle `Cassette_2026-07-29_15-42-10.mp4` (date et heure) et se
@@ -329,6 +386,7 @@ majorité des cas.
 |---|---|
 | **L'image reste noire** | Le magnétoscope est-il vraiment en **Lecture** (bande qui défile) ? La fiche **jaune** est-elle sur la sortie **OUT** du magnétoscope ? |
 | **Image en noir et blanc** | Mauvaise norme couleur : dans l'app, passez de **PAL** à **SECAM** (ou l'inverse). |
+| **`error: 'app': Invalid manifest` / `no such module 'PackageDescription'`** | Chaîne d'outils Swift incomplète. La version actuelle du projet n'utilise plus Swift Package Manager : re-téléchargez le dossier (étape 5) et relancez `make app`. |
 | **« Outil dvc100 introuvable »** | L'app a été lancée sans avoir été construite : refaites l'étape 6. |
 | **« ffmpeg introuvable »** | Refaites l'étape 4 : `brew install ffmpeg`. |
 | **« aucun boîtier EM28xx reconnu »** | Le boîtier n'est pas branché, ou son identifiant est inconnu. Tapez `system_profiler SPUSBDataType \| grep -i -A 6 dazzle` et envoyez-moi le résultat. |

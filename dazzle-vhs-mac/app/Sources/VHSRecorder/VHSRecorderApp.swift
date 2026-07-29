@@ -9,7 +9,6 @@ struct VHSRecorderApp: App {
             ContentView(engine: engine)
                 .frame(minWidth: 940, minHeight: 620)
         }
-        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) { }
         }

@@ -97,7 +97,7 @@ final class FrameSink: @unchecked Sendable {
     @discardableResult
     func write(_ data: Data) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard let handle else { return true }
+        guard let handle = handle else { return true }
         do {
             try handle.write(contentsOf: data)
             return true

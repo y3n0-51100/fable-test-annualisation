@@ -22,9 +22,24 @@ BIN     := $(BUILD)/dvc100
 APP_NAME    := VHSRecorder
 APP_BUNDLE  := $(BUILD)/$(APP_NAME).app
 
-.PHONY: all app clean install uninstall check
+.PHONY: all app clean install uninstall check doctor
 
 all: $(BIN)
+
+# Etat de l'environnement, a copier-coller en cas de probleme.
+doctor:
+	@echo "--- Environnement ---"
+	@echo "macOS       : $$(sw_vers -productVersion 2>/dev/null)"
+	@echo "Processeur  : $$(uname -m)"
+	@echo "Xcode actif : $$(xcode-select -p 2>&1)"
+	@echo "swiftc      : $$(xcrun --find swiftc 2>&1)"
+	@echo "SDK macOS   : $$(xcrun --show-sdk-path --sdk macosx 2>&1)"
+	@echo "Swift       : $$(xcrun swiftc --version 2>&1 | head -1)"
+	@echo "Homebrew    : $$(command -v brew || echo absent)"
+	@echo "libusb      : $$($(PKG_CONFIG) --modversion libusb-1.0 2>/dev/null || echo absent)"
+	@echo "ffmpeg      : $$(command -v ffmpeg || echo absent)"
+	@echo "dvc100      : $$([ -x $(BIN) ] && echo construit || echo 'pas encore construit')"
+	@echo "app         : $$([ -d $(APP_BUNDLE) ] && echo construite || echo 'pas encore construite')"
 
 $(BUILD):
 	@mkdir -p $(BUILD)
@@ -48,16 +63,28 @@ uninstall:
 	rm -f $(PREFIX)/bin/dvc100
 
 # --- Application macOS ------------------------------------------------
-# Swift Package Manager produit un executable ; on l'emballe a la main dans
-# un bundle .app pour que macOS lui accorde une identite (icone dans le Dock,
-# autorisation micro pour la capture audio).
+# On appelle swiftc directement plutot que Swift Package Manager : SwiftPM
+# doit d'abord compiler son manifeste (module PackageDescription), qui manque
+# dans certaines installations des Command Line Tools et fait echouer la
+# construction avec "Invalid manifest". Le compilateur, lui, suffit.
+
+SWIFT_SRCS := $(wildcard app/Sources/VHSRecorder/*.swift)
+MACOS_MIN  := 12.0
+ARCH       := $(shell uname -m)
 
 app: $(BIN)
-	swift build -c release --package-path app
+	@command -v xcrun >/dev/null 2>&1 || { \
+		echo "xcrun introuvable : lancez 'xcode-select --install'"; exit 1; }
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(APP_BUNDLE)/Contents/MacOS $(APP_BUNDLE)/Contents/Resources
+	xcrun swiftc -O -swift-version 5 -parse-as-library \
+		-sdk "$$(xcrun --show-sdk-path --sdk macosx)" \
+		-target $(ARCH)-apple-macos$(MACOS_MIN) \
+		-framework SwiftUI -framework AppKit \
+		-framework CoreImage -framework CoreVideo \
+		-o $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME) \
+		$(SWIFT_SRCS)
 	@cp app/Info.plist $(APP_BUNDLE)/Contents/Info.plist
-	@cp app/.build/release/$(APP_NAME) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	@cp $(BIN) $(APP_BUNDLE)/Contents/Resources/dvc100
 	@codesign --force --deep --sign - $(APP_BUNDLE) 2>/dev/null || \
 		echo "(signature ad-hoc impossible, l'app fonctionnera quand meme en local)"
