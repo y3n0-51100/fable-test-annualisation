@@ -213,6 +213,7 @@ typedef struct {
     uint64_t nonzero;       /* octets non nuls recus (si detailed_stats)  */
     uint64_t header_video;  /* paquets commencant par 22 5a            */
     uint64_t header_vbi;    /* paquets commencant par 33 95            */
+    uint64_t header_marker; /* paquets commencant par 88 88 88 88      */
     uint64_t header_other;  /* paquets sans en-tete reconnu            */
     uint64_t frames;
     uint64_t dropped;

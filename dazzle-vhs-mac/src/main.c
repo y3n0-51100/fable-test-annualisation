@@ -699,6 +699,7 @@ int main(int argc, char **argv)
                (unsigned long long)st->iso_packets_ok);
         printf("  en-tete video (22 5a) : %llu\n", (unsigned long long)st->header_video);
         printf("  en-tete VBI   (33 95) : %llu\n", (unsigned long long)st->header_vbi);
+        printf("  marqueur (88 88 88 88): %llu\n", (unsigned long long)st->header_marker);
         printf("  sans en-tete          : %llu\n", (unsigned long long)st->header_other);
         printf("Octets recus            : %llu\n", (unsigned long long)st->bytes);
         printf("Octets non nuls recus   : %llu (%.2f %%)\n",

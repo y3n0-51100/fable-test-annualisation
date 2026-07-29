@@ -678,7 +678,16 @@ static void process_packet(em_device *dev, const uint8_t *data, int len)
         return;             /* VBI field, not useful for plain capture */
     } else if (data[0] == 0x88 && data[1] == 0x88 &&
                data[2] == 0x88 && data[3] == 0x88) {
-        return;             /* EM25xx style header, unused here */
+        /* Marqueur de continuation inter-paquet, pas un en-tete de champ :
+         * ce boitier prefixe chaque paquet isochrone (pas seulement le
+         * premier du champ) par ces 4 octets. La ligne et le champ en cours
+         * ne changent pas ; seul le contenu utile commence apres eux. Une
+         * version precedente traitait ce motif comme "a ignorer" et jetait
+         * le paquet entier au lieu de sauter seulement l'en-tete - ce qui
+         * perdait la quasi-totalite de chaque image. */
+        dev->stats.header_marker++;
+        data += 4;
+        len -= 4;
     } else {
         dev->stats.header_other++;
     }
