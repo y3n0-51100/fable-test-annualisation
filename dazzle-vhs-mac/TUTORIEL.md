@@ -402,7 +402,8 @@ majorité des cas.
 | **« ffmpeg introuvable »** | Refaites l'étape 4 : `brew install ffmpeg`. |
 | **« aucun boîtier EM28xx reconnu »** | Le boîtier n'est pas branché, ou son identifiant est inconnu. Tapez `system_profiler SPUSBDataType \| grep -i -A 6 dazzle` et envoyez-moi le résultat. |
 | **Image saccadée** | Branchez le boîtier directement sur le Mac (sans hub), et fermez les applications lourdes. |
-| **Le son est absent ou grésille** | Vérifiez l'entrée choisie dans « Audio », et que les fiches rouge et blanche sont bien enfoncées. |
+| **La liste « Audio » est vide** | macOS n'a pas donné l'autorisation micro : Réglages Système → Confidentialité et sécurité → **Microphone** → activez VHS Recorder, puis cliquez sur « Rechercher les entrées audio ». Si elle reste vide, lancez `build/dvc100 probe` et regardez la ligne **« Audio USB Class »** : si elle dit `non`, votre boîtier n'expose pas son son à macOS — voir la section « Le son » du `README.md` pour les solutions. |
+| **Le son est absent ou grésille** | Vérifiez l'entrée choisie dans « Audio », que les fiches rouge et blanche sont bien enfoncées côté **OUT** du magnétoscope, et que le niveau bouge dans Réglages Système → Son → Entrée pendant la lecture. |
 | **Autre chose** | Dans l'app, cliquez sur **Journal** en bas à droite de l'image : copiez les dernières lignes et envoyez-les moi. |
 
 ---

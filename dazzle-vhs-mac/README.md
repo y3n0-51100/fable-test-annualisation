@@ -131,13 +131,39 @@ build/dvc100 stream --standard pal --stats | \
 
 ### Le son
 
-Le DVC100 expose (selon les révisions) son entrée audio comme un périphérique
-audio USB standard : dans ce cas macOS le voit tout seul, il apparaît dans
-Réglages Système → Son, et l'application le propose dans la liste « Audio ».
-`dvc100 probe` indique si c'est le cas sur votre exemplaire (ligne
-« Audio USB Class »). Sinon, il faut relier la sortie audio du magnétoscope à
-une entrée ligne du Mac (ou à une petite interface USB audio) et choisir cette
-entrée dans l'application.
+Contrairement à la vidéo, le son ne passe **pas** par ce pilote : sur la
+plupart des révisions, le DVC100 expose son entrée audio comme un périphérique
+**USB audio standard**, que macOS pilote tout seul. L'application se contente
+alors de demander à ffmpeg d'enregistrer cette entrée.
+
+**Trois vérifications, dans cet ordre :**
+
+1. `build/dvc100 probe` → ligne **« Audio USB Class »**. C'est la réponse
+   matérielle : `oui` signifie que macOS peut voir le son, `non` qu'il ne le
+   pourra jamais, quel que soit le logiciel.
+2. **Réglages Système → Son → Entrée** : le boîtier doit y figurer, sous un nom
+   du genre « USB audio CODEC », « eMPIA » ou « Dazzle ». Mettez le
+   magnétoscope en lecture : le niveau doit bouger.
+3. Dans l'application, bouton **« Rechercher les entrées audio »**. La première
+   fois, macOS demande l'autorisation d'accéder au micro — **il faut
+   l'accepter**, sinon la liste reste vide. Si vous avez refusé par mégarde :
+   Réglages Système → Confidentialité et sécurité → Microphone → activez
+   VHS Recorder.
+
+**Si l'audio USB n'existe pas sur votre exemplaire** (cas `non` en 1), le son
+doit entrer dans le Mac par un autre chemin :
+
+- un petit **adaptateur USB audio** avec entrée ligne ou micro (une dizaine
+  d'euros) relié aux fiches rouge et blanche du magnétoscope — c'est la
+  solution la plus simple ;
+- l'**entrée ligne** du Mac, si le vôtre en a une (les modèles récents n'en ont
+  plus, et la prise casque n'accepte qu'un micro, pas un niveau ligne) ;
+- en dernier recours, enregistrer le son séparément et le recoller ensuite :
+  `ffmpeg -i video.mp4 -i son.wav -c:v copy -c:a aac final.mp4`.
+
+Dans tous les cas, l'entrée choisie apparaît dans la liste « Audio » de
+l'application, et la vidéo s'enregistre parfaitement sans son si vous
+choisissez « Aucun ».
 
 ### Qualité d'archivage
 

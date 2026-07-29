@@ -8,7 +8,7 @@ struct ContentView: View {
     @AppStorage("input") private var inputRaw = VideoInput.composite.rawValue
     @AppStorage("quality") private var qualityRaw = Quality.standard.rawValue
     @AppStorage("deinterlace") private var deinterlace = true
-    @AppStorage("audioIndex") private var audioIndex = -1
+    @AppStorage("audioName") private var audioName = ""
     @AppStorage("outputFolder") private var outputFolderPath = ""
     @AppStorage("limit") private var limitRaw = RecordingLimit.unlimited.rawValue
     @AppStorage("customMinutes") private var customMinutes = 180
@@ -43,6 +43,15 @@ struct ContentView: View {
         .onAppear {
             applySettings()
             engine.refreshAudioDevices()
+        }
+        // L'autorisation micro peut arriver bien apres l'affichage : la liste
+        // se remplit alors toute seule, et la selection doit suivre.
+        .onChange(of: engine.audioDevices) { devices in
+            if !audioName.isEmpty && devices.contains(where: { $0.name == audioName }) {
+                engine.audioDeviceName = audioName
+            } else {
+                audioName = engine.audioDeviceName ?? ""
+            }
         }
     }
 
@@ -150,12 +159,21 @@ struct ContentView: View {
                             Text(input.label).tag(input.rawValue)
                         }
                     }
-                    Picker("Audio", selection: $audioIndex) {
-                        Text("Aucun (video seule)").tag(-1)
+                    Picker("Audio", selection: $audioName) {
+                        Text("Aucun (video seule)").tag("")
                         ForEach(engine.audioDevices) { device in
-                            Text(device.name).tag(device.index)
+                            Text(device.name).tag(device.name)
                         }
                     }
+                    .onChange(of: audioName) { _ in applySettings() }
+
+                    if let problem = engine.audioProblem {
+                        Text(problem)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     Button("Rechercher les entrees audio") {
                         engine.refreshAudioDevices()
                     }
@@ -283,7 +301,7 @@ struct ContentView: View {
         engine.input = VideoInput(rawValue: inputRaw) ?? .composite
         engine.quality = Quality(rawValue: qualityRaw) ?? .standard
         engine.deinterlace = deinterlace
-        engine.audioDeviceIndex = audioIndex >= 0 ? audioIndex : nil
+        engine.audioDeviceName = audioName.isEmpty ? nil : audioName
         engine.recordingLimit = limit.seconds(customMinutes: customMinutes)
     }
 

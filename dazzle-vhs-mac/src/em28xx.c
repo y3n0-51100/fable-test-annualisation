@@ -421,18 +421,44 @@ void em_describe(em_device *dev, FILE *out)
     if (chipcfg >= 0)
         fprintf(out, "Chip config (R00) : 0x%02x\n", chipcfg);
 
-    /* Does the board also expose a standard USB audio interface? If so the
-     * sound arrives in Core Audio on its own and ffmpeg can grab it. */
+    /* Full interface map. What matters for sound: a standard USB audio class
+     * interface means macOS drives it by itself and ffmpeg can record it;
+     * anything else means the audio is behind the vendor protocol and macOS
+     * cannot see it at all. */
     struct libusb_config_descriptor *conf = NULL;
     if (libusb_get_active_config_descriptor(dev->dev, &conf) == 0) {
-        bool audio = false;
-        for (int i = 0; i < conf->bNumInterfaces; i++)
-            for (int a = 0; a < conf->interface[i].num_altsetting; a++)
-                if (conf->interface[i].altsetting[a].bInterfaceClass == LIBUSB_CLASS_AUDIO)
-                    audio = true;
-        fprintf(out, "Audio USB Class   : %s\n", audio
-                ? "oui - le son doit apparaitre comme entree audio macOS"
-                : "non - son a capturer via l'entree ligne, voir README");
+        bool audio_class = false;
+        fprintf(out, "Interfaces USB    :\n");
+        for (int i = 0; i < conf->bNumInterfaces; i++) {
+            for (int a = 0; a < conf->interface[i].num_altsetting; a++) {
+                const struct libusb_interface_descriptor *alt =
+                    &conf->interface[i].altsetting[a];
+                const char *class_name;
+                switch (alt->bInterfaceClass) {
+                case LIBUSB_CLASS_AUDIO:       class_name = "audio"; audio_class = true; break;
+                case LIBUSB_CLASS_VIDEO:       class_name = "video (UVC)"; break;
+                case LIBUSB_CLASS_HID:         class_name = "HID"; break;
+                case LIBUSB_CLASS_VENDOR_SPEC: class_name = "specifique vendeur"; break;
+                default:                       class_name = "autre"; break;
+                }
+                fprintf(out, "  itf %d alt %d  classe 0x%02x (%s)",
+                        alt->bInterfaceNumber, alt->bAlternateSetting,
+                        alt->bInterfaceClass, class_name);
+                for (int e = 0; e < alt->bNumEndpoints; e++) {
+                    const struct libusb_endpoint_descriptor *ep = &alt->endpoint[e];
+                    static const char *types[] = { "ctrl", "isoc", "bulk", "intr" };
+                    fprintf(out, "  [ep 0x%02x %s %d o]",
+                            ep->bEndpointAddress,
+                            types[ep->bmAttributes & 0x03],
+                            packet_bytes(ep->wMaxPacketSize));
+                }
+                fprintf(out, "\n");
+            }
+        }
+        fprintf(out, "Audio USB Class   : %s\n", audio_class
+                ? "oui - le son apparait comme entree audio macOS standard"
+                : "non - macOS ne peut pas voir le son de ce boitier, "
+                  "il faut passer par une entree ligne (voir README)");
         libusb_free_config_descriptor(conf);
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import CoreImage
 import CoreVideo
 import Foundation
@@ -98,9 +99,10 @@ enum RecordingLimit: String, CaseIterable, Identifiable {
 }
 
 struct AudioDevice: Identifiable, Hashable {
-    let index: Int
+    /// Nom tel que macOS l'expose : c'est aussi ce qu'on passe à ffmpeg,
+    /// plus fiable qu'un numéro d'index dont l'ordre peut changer.
     let name: String
-    var id: Int { index }
+    var id: String { name }
 }
 
 /// Holds the pipe to ffmpeg. Frames are written from the USB reader thread —
@@ -166,12 +168,14 @@ final class CaptureEngine: ObservableObject {
     @Published private(set) var status: String = "Pret"
     @Published private(set) var log: [String] = []
     @Published private(set) var audioDevices: [AudioDevice] = []
+    /// Message à afficher quand aucune entrée audio n'est exploitable.
+    @Published private(set) var audioProblem: String?
 
     var standard: VideoStandard = .pal
     var input: VideoInput = .composite
     var quality: Quality = .standard
     var deinterlace = true
-    var audioDeviceIndex: Int?
+    var audioDeviceName: String?
     /// Arrêt automatique après ce nombre de secondes ; nil = jusqu'au clic.
     var recordingLimit: TimeInterval?
 
@@ -228,8 +232,63 @@ final class CaptureEngine: ObservableObject {
 
     // MARK: Audio devices
 
+    /// macOS ne laisse pas énumérer les entrées audio sans autorisation
+    /// explicite : sans ce passage, la liste revient vide et l'enregistrement
+    /// se fait en silence, sans le moindre message.
     func refreshAudioDevices() {
-        guard let ffmpeg = ffmpegPath else { return }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .notDetermined:
+            audioProblem = "Autorisation micro demandee..."
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] _ in
+                DispatchQueue.main.async { self?.listAudioDevices() }
+            }
+        case .denied, .restricted:
+            audioDevices = []
+            audioProblem = "Acces au micro refuse. Reglages Systeme > "
+                + "Confidentialite et securite > Microphone > activez VHS Recorder."
+        default:
+            listAudioDevices()
+        }
+    }
+
+    private func listAudioDevices() {
+        // Source principale : AVFoundation, celle que ffmpeg interrogera aussi.
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInMicrophone, .externalUnknown],
+            mediaType: .audio,
+            position: .unspecified)
+        var devices = session.devices.map { AudioDevice(name: $0.localizedName) }
+
+        // Repli : certaines configurations ne renvoient rien via la session de
+        // decouverte alors que ffmpeg, lui, voit les peripheriques.
+        if devices.isEmpty {
+            devices = ffmpegAudioDevices()
+        }
+
+        audioDevices = devices
+        if devices.isEmpty {
+            audioProblem = "Aucune entree audio detectee. Le boitier n'expose "
+                + "peut-etre pas son son a macOS : voir la section audio du README."
+        } else {
+            audioProblem = nil
+            let known = devices.contains { $0.name == audioDeviceName }
+            if audioDeviceName == nil || !known {
+                // Preferer une entree qui ressemble au boitier de capture.
+                let capture = devices.first { device in
+                    let name = device.name.lowercased()
+                    return name.contains("usb") || name.contains("empia")
+                        || name.contains("em28") || name.contains("dazzle")
+                        || name.contains("codec")
+                }
+                audioDeviceName = (capture ?? devices.first)?.name
+            }
+        }
+        appendLog("entrees audio : " + (devices.isEmpty
+            ? "aucune" : devices.map { $0.name }.joined(separator: ", ")))
+    }
+
+    private func ffmpegAudioDevices() -> [AudioDevice] {
+        guard let ffmpeg = ffmpegPath else { return [] }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ffmpeg)
         proc.arguments = ["-hide_banner", "-f", "avfoundation",
@@ -237,7 +296,7 @@ final class CaptureEngine: ObservableObject {
         let pipe = Pipe()
         proc.standardError = pipe
         proc.standardOutput = FileHandle.nullDevice
-        do { try proc.run() } catch { return }
+        do { try proc.run() } catch { return [] }
         let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
                           encoding: .utf8) ?? ""
         proc.waitUntilExit()
@@ -250,10 +309,7 @@ final class CaptureEngine: ObservableObject {
             guard inAudioSection, let device = line.matchesIndexedDevice() else { continue }
             devices.append(device)
         }
-        audioDevices = devices
-        if audioDeviceIndex == nil {
-            audioDeviceIndex = devices.first?.index
-        }
+        return devices
     }
 
     // MARK: Streaming
@@ -380,8 +436,10 @@ final class CaptureEngine: ObservableObject {
             "-s", "\(w)x\(h)", "-r", String(format: "%.4f", standard.fps),
             "-i", "pipe:0",
         ]
-        if let idx = audioDeviceIndex {
-            args += ["-f", "avfoundation", "-i", ":\(idx)",
+        // ffmpeg accepte le nom du peripherique apres les deux-points ; la
+        // partie video reste vide puisqu'elle arrive par le tube.
+        if let name = audioDeviceName, !name.isEmpty {
+            args += ["-f", "avfoundation", "-i", ":\(name)",
                      "-c:a", "aac", "-b:a", "192k"]
         }
         if deinterlace {
@@ -608,10 +666,10 @@ private extension Substring {
         guard let bracket = range(of: "] [", options: .backwards) else { return nil }
         let rest = self[bracket.upperBound...]
         guard let close = rest.firstIndex(of: "]") else { return nil }
-        guard let index = Int(rest[rest.startIndex..<close]) else { return nil }
+        guard Int(rest[rest.startIndex..<close]) != nil else { return nil }
         let name = rest[rest.index(after: close)...]
             .trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return nil }
-        return AudioDevice(index: index, name: name)
+        return AudioDevice(name: name)
     }
 }
