@@ -191,8 +191,12 @@ void em_describe(em_device *dev, FILE *out);
 void em_dump_registers(em_device *dev, FILE *out);
 void em_scan_i2c(em_device *dev, FILE *out);
 
-/* Decoder (SAA711x) support, in saa711x.c */
-int saa711x_detect(em_device *dev, uint8_t *addr_out);
+/* Decoder (SAA711x) support, in saa711x.c.
+ * version_out receives the raw chip version register; its low nibble is the
+ * model digit (1 = SAA7111, 3 = SAA7113, 5 = SAA7115...). Both out params
+ * may be NULL. */
+int saa711x_detect(em_device *dev, uint8_t *addr_out, int *version_out);
+const char *saa711x_model(int version);
 int saa711x_init(em_device *dev, uint8_t addr, const em_config *cfg,
                  char *err, size_t errlen);
 int saa711x_set_input(em_device *dev, uint8_t addr, em_input input);

@@ -399,18 +399,22 @@ void em_describe(em_device *dev, FILE *out)
     int chipid = em_read_reg(dev, EM28XX_R0A_CHIPID);
     int chipcfg = em_read_reg(dev, EM28XX_R00_CHIPCFG);
     if (chipid >= 0) {
-        const char *chip = "EM28xx";
+        /* Identifiants tels que les liste le pilote Linux (valeurs decimales
+         * dans le noyau, donnees ici en hexadecimal). */
+        const char *chip = "EM28xx inconnu";
         switch (chipid) {
-        case 0x23: chip = "EM2800"; break;
-        case 0x24: chip = "EM2800"; break;
-        case 0x30: chip = "EM2820/EM2840"; break;
-        case 0x33: chip = "EM2860"; break;
-        case 0x34: chip = "EM2870/EM2883"; break;
-        case 0x35: chip = "EM2870"; break;
-        case 0x36: chip = "EM2874"; break;
-        case 0x37: chip = "EM2874B"; break;
-        case 0x3b: chip = "EM2884"; break;
-        case 0x3c: chip = "EM2874B"; break;
+        case 0x07: chip = "EM2800"; break;
+        case 0x11: chip = "EM2710"; break;
+        case 0x12: chip = "EM2820 (ou EM2710)"; break;
+        case 0x14: chip = "EM2840"; break;
+        case 0x21: chip = "EM2750"; break;
+        case 0x22: chip = "EM2860"; break;
+        case 0x23: chip = "EM2870"; break;
+        case 0x24: chip = "EM2883"; break;
+        case 0x41: chip = "EM2874"; break;
+        case 0x44: chip = "EM2884"; break;
+        case 0x71: chip = "EM28174"; break;
+        case 0x72: chip = "EM28178"; break;
         default: break;
         }
         fprintf(out, "Chip ID (R0A)     : 0x%02x (%s)\n", chipid, chip);
@@ -554,8 +558,11 @@ int em_configure(em_device *dev, char *err, size_t errlen)
      * up already configured, and the user can iterate with --i2c-init. */
     if (!dev->cfg.skip_decoder_init) {
         uint8_t addr = 0;
-        if (saa711x_detect(dev, &addr) == 0) {
+        int version = 0;
+        if (saa711x_detect(dev, &addr, &version) == 0) {
             dev->decoder_addr = addr;
+            fprintf(stderr, "decodeur %s (version 0x%02x) a l'adresse 0x%02x\n",
+                    saa711x_model(version), version, addr);
             char derr[256] = "";
             if (saa711x_init(dev, addr, &dev->cfg, derr, sizeof(derr)) < 0)
                 fprintf(stderr, "attention: init du decodeur incomplete: %s\n", derr);

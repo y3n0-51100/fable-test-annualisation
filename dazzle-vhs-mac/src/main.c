@@ -379,7 +379,7 @@ int main(int argc, char **argv)
         em_scan_i2c(dev, stdout);
         uint8_t addr = 0;
         fprintf(stdout, "\n");
-        if (saa711x_detect(dev, &addr) == 0)
+        if (saa711x_detect(dev, &addr, NULL) == 0)
             saa711x_status(dev, addr, stdout);
         else
             fprintf(stdout, "Decodeur          : non detecte\n");

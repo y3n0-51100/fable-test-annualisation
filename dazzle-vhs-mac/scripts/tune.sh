@@ -85,7 +85,13 @@ for fmt in 0x00 0x08 0x40 0x48; do
 done
 
 echo
-echo "5. Temoins :"
+echo "5. Norme couleur (registre 0x0e) :"
+for chroma in 0x01 0x11 0x21 0x31 0x41 0x51; do
+    try "norme $chroma" --i2c-set "0x0e=$chroma"
+done
+
+echo
+echo "6. Temoins :"
 try "decodeur non initialise" --skip-decoder
 try "reglages par defaut"
 
