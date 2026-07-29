@@ -39,6 +39,14 @@ static void usage(FILE *out)
 "                                    analogique il voit un signal (3 secondes)\n"
 "  dvc100 test  [options]            capture quelques trames et dit ce qu'elles\n"
 "                                    contiennent (vide / noir / vraie image)\n"
+"  dvc100 sweep CIBLE [options]      balaye toutes les valeurs d'un registre en\n"
+"                                    mesurant les pixels recus. Cibles :\n"
+"                                      gpio    routage analogique de la carte\n"
+"                                      gpo     seconde ligne de commande\n"
+"                                      mux     entree analogique du decodeur\n"
+"                                      out     sortie numerique du decodeur\n"
+"                                      gain    gain analogique du decodeur\n"
+"                                      vinctrl, vinmode, 0xNN, i2c:0xNN\n"
 "  dvc100 stream [options]           sort des trames YUYV brutes sur stdout\n"
 "\n"
 "Options principales :\n"
@@ -276,6 +284,115 @@ static void report_test(const struct probe_stats *s, const em_config *cfg)
            em_config_width(cfg), em_config_height(cfg));
 }
 
+/* ------------------------------------------------------------------ */
+/* `sweep` : balayage d'un registre en mesurant les pixels recus       */
+/*                                                                     */
+/* On garde un seul flux ouvert et on change le registre en cours de   */
+/* route : quatre trames suffisent par valeur, soit moins d'une minute */
+/* pour les 256 valeurs d'un registre. Le critere est le contenu reel  */
+/* des trames, pas un bit d'etat dont la signification est incertaine. */
+/* ------------------------------------------------------------------ */
+
+#define SWEEP_SETTLE  3     /* trames ignorees apres un changement */
+#define SWEEP_MEASURE 2     /* trames mesurees ensuite             */
+
+struct sweep_result { int value; double score; };
+
+struct sweep_state {
+    em_device *dev;
+    bool     on_decoder;    /* false = registre du pont, true = decodeur I2C */
+    uint8_t  addr;          /* adresse I2C du decodeur */
+    uint8_t  reg;
+    int      first, last;
+    int      current;
+    int      frames_at_value;
+    uint64_t nonzero, total;
+    struct sweep_result results[256];
+    int      n_results;
+};
+
+static void sweep_apply(struct sweep_state *s, int value)
+{
+    if (s->on_decoder)
+        em_i2c_write_reg(s->dev, s->addr, s->reg, (uint8_t)value);
+    else
+        em_write_reg(s->dev, s->reg, (uint8_t)value);
+}
+
+static int on_sweep_frame(const uint8_t *data, size_t len, void *user)
+{
+    struct sweep_state *s = user;
+
+    s->frames_at_value++;
+    if (s->frames_at_value <= SWEEP_SETTLE)
+        return 0;
+
+    for (size_t i = 0; i < len; i++)
+        if (data[i])
+            s->nonzero++;
+    s->total += len;
+
+    if (s->frames_at_value < SWEEP_SETTLE + SWEEP_MEASURE)
+        return 0;
+
+    double score = 100.0 * (double)s->nonzero / (double)(s->total ? s->total : 1);
+    if (s->n_results < 256) {
+        s->results[s->n_results].value = s->current;
+        s->results[s->n_results].score = score;
+        s->n_results++;
+    }
+    fprintf(stderr, "\r  0x%02x -> %6.2f %% d'octets utiles   ",
+            s->current, score);
+    fflush(stderr);
+
+    s->current++;
+    s->nonzero = s->total = 0;
+    s->frames_at_value = 0;
+    if (s->current > s->last)
+        return 1;
+    sweep_apply(s, s->current);
+    return 0;
+}
+
+static int compare_results(const void *a, const void *b)
+{
+    const struct sweep_result *ra = a;
+    const struct sweep_result *rb = b;
+    if (ra->score < rb->score) return 1;
+    if (ra->score > rb->score) return -1;
+    return 0;
+}
+
+static void report_sweep(struct sweep_state *s)
+{
+    fprintf(stderr, "\r%60s\r", "");
+    printf("\n--- Balayage du registre 0x%02x (%s) ---\n",
+           s->reg, s->on_decoder ? "decodeur" : "pont USB");
+
+    if (s->n_results == 0) {
+        printf("Aucune mesure : le flux ne fournit pas de trames.\n");
+        return;
+    }
+
+    /* Classement decroissant, sans toucher a l'ordre d'origine. */
+    qsort(s->results, (size_t)s->n_results, sizeof(s->results[0]), compare_results);
+
+    printf("Meilleures valeurs :\n");
+    int shown = s->n_results < 8 ? s->n_results : 8;
+    for (int i = 0; i < shown; i++)
+        printf("  0x%02x : %6.2f %% d'octets utiles\n",
+               s->results[i].value, s->results[i].score);
+
+    if (s->results[0].score < 1.0) {
+        printf("\nAucune valeur ne change quoi que ce soit : le probleme n'est pas\n"
+               "dans ce registre. Essayez une autre cible, ou verifiez d'abord que\n"
+               "le magnetoscope sort bien une image (branchez-le sur un televiseur).\n");
+    } else {
+        printf("\nA retenir : %s 0x%02x=0x%02x\n",
+               s->on_decoder ? "--i2c-set" : "--reg", s->reg, s->results[0].value);
+    }
+}
+
 static int parse_int(const char *s, int *out)
 {
     char *end = NULL;
@@ -299,10 +416,18 @@ int main(int argc, char **argv)
         return 0;
     }
     if (strcmp(cmd, "probe") && strcmp(cmd, "stream") &&
-        strcmp(cmd, "test") && strcmp(cmd, "inputs")) {
+        strcmp(cmd, "test") && strcmp(cmd, "inputs") && strcmp(cmd, "sweep")) {
         fprintf(stderr, "commande inconnue: %s\n\n", cmd);
         usage(stderr);
         return 2;
+    }
+
+    /* `sweep` prend une cible en argument libre : dvc100 sweep gpio */
+    const char *sweep_target = NULL;
+    int first_option = 2;
+    if (!strcmp(cmd, "sweep") && argc > 2 && argv[2][0] != '-') {
+        sweep_target = argv[2];
+        first_option = 3;
     }
 
     em_config cfg;
@@ -315,7 +440,7 @@ int main(int argc, char **argv)
     struct { uint8_t reg, val; } overrides[16];
     int n_overrides = 0;
 
-    for (int i = 2; i < argc; i++) {
+    for (int i = first_option; i < argc; i++) {
         const char *a = argv[i];
         const char *next = (i + 1 < argc) ? argv[i + 1] : NULL;
         int v = 0;
@@ -503,6 +628,80 @@ int main(int argc, char **argv)
         }
         /* Remettre l'entree demandee avant de rendre la main. */
         saa711x_set_input(dev, addr, cfg.input);
+        goto done;
+    }
+
+    if (!strcmp(cmd, "sweep")) {
+        struct sweep_state sw;
+        memset(&sw, 0, sizeof(sw));
+        sw.dev = dev;
+        sw.first = 0;
+        sw.last = 255;
+
+        /* Cibles nommees, des plus probables aux plus exotiques. */
+        if (!sweep_target || !strcmp(sweep_target, "gpio")) {
+            sw.reg = EM28XX_R08_GPIO;              /* routage analogique de la carte */
+        } else if (!strcmp(sweep_target, "gpo")) {
+            sw.reg = EM28XX_R04_GPO;
+        } else if (!strcmp(sweep_target, "mux")) {
+            sw.on_decoder = true; sw.reg = 0x02;   /* entree analogique du decodeur */
+            sw.first = 0xc0; sw.last = 0xcf;
+        } else if (!strcmp(sweep_target, "out")) {
+            sw.on_decoder = true; sw.reg = 0x11;   /* sortie numerique du decodeur */
+            sw.last = 0x3f;
+        } else if (!strcmp(sweep_target, "gain")) {
+            sw.on_decoder = true; sw.reg = 0x03;   /* controle de gain analogique */
+        } else if (!strcmp(sweep_target, "vinctrl")) {
+            sw.reg = EM28XX_R11_VINCTRL;
+            sw.last = 0x3f;
+        } else if (!strcmp(sweep_target, "vinmode")) {
+            sw.reg = EM28XX_R10_VINMODE;
+            sw.last = 0x3f;
+        } else {
+            unsigned r = 0;
+            if (sscanf(sweep_target, "i2c:%i", &r) == 1) {
+                sw.on_decoder = true; sw.reg = (uint8_t)r;
+            } else if (sscanf(sweep_target, "%i", &r) == 1) {
+                sw.reg = (uint8_t)r;
+            } else {
+                fprintf(stderr,
+                    "cible inconnue: %s\n"
+                    "cibles : gpio, gpo, mux, out, gain, vinctrl, vinmode,\n"
+                    "         0xNN (registre du pont), i2c:0xNN (registre du decodeur)\n",
+                    sweep_target);
+                status = 2;
+                goto done;
+            }
+        }
+
+        if (sw.on_decoder && saa711x_detect(dev, &sw.addr, NULL) < 0) {
+            fprintf(stderr, "decodeur introuvable sur le bus I2C\n");
+            status = 1;
+            goto done;
+        }
+
+        int original = sw.on_decoder
+            ? em_i2c_read_reg(dev, sw.addr, sw.reg)
+            : em_read_reg(dev, sw.reg);
+
+        printf("Balayage de 0x%02x a 0x%02x sur le registre 0x%02x (%s).\n",
+               sw.first, sw.last, sw.reg, sw.on_decoder ? "decodeur" : "pont USB");
+        printf("Valeur actuelle : 0x%02x. Environ %d secondes. "
+               "Cassette en LECTURE !\n\n",
+               original < 0 ? 0 : original,
+               (sw.last - sw.first + 1) * (SWEEP_SETTLE + SWEEP_MEASURE) / 25 + 1);
+
+        sw.current = sw.first;
+        sweep_apply(&sw, sw.current);
+
+        if (em_stream(dev, on_sweep_frame, &sw, err, sizeof(err)) < 0) {
+            fprintf(stderr, "\n%s\n", err);
+            status = 1;
+        }
+        report_sweep(&sw);
+
+        if (original >= 0)
+            sweep_apply(&sw, original);     /* remettre l'etat de depart */
         goto done;
     }
 
