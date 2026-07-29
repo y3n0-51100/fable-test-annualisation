@@ -142,6 +142,7 @@ typedef struct {
     const char *i2c_init_path;  /* optional override table for the decoder */
     bool        skip_decoder_init;
     bool        verbose;
+    bool        detailed_stats;  /* compter les octets non nuls a la reception */
 
     /* Decoder registers written last, after init/standard/input. This is the
      * knob for board-specific wiring, and what scripts/tune.sh sweeps. */
@@ -207,11 +208,21 @@ int saa711x_status(em_device *dev, uint8_t addr, FILE *out);
 typedef struct {
     uint64_t iso_packets;
     uint64_t iso_packets_ok;
-    uint64_t bytes;
+    uint64_t bytes;         /* octets recus sur l'endpoint isochrone   */
+    uint64_t copied;        /* octets effectivement places dans une trame */
+    uint64_t nonzero;       /* octets non nuls recus (si detailed_stats)  */
+    uint64_t header_video;  /* paquets commencant par 22 5a            */
+    uint64_t header_vbi;    /* paquets commencant par 33 95            */
+    uint64_t header_other;  /* paquets sans en-tete reconnu            */
     uint64_t frames;
     uint64_t dropped;
 } em_stats;
 
 const em_stats *em_get_stats(em_device *dev);
+
+/* Observation brute du flux, pour le diagnostic : appelee pour chaque paquet
+ * isochrone non vide, avant tout traitement. */
+typedef void (*em_packet_cb)(const uint8_t *data, int len, void *user);
+void em_set_packet_cb(em_device *dev, em_packet_cb cb, void *user);
 
 #endif /* EM28XX_H */

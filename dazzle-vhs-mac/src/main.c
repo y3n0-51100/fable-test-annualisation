@@ -39,6 +39,8 @@ static void usage(FILE *out)
 "                                    analogique il voit un signal (3 secondes)\n"
 "  dvc100 test  [options]            capture quelques trames et dit ce qu'elles\n"
 "                                    contiennent (vide / noir / vraie image)\n"
+"  dvc100 raw   [options]            montre ce que contiennent vraiment les\n"
+"                                    paquets USB recus\n"
 "  dvc100 sweep CIBLE [options]      balaye toutes les valeurs d'un registre en\n"
 "                                    mesurant les pixels recus. Cibles :\n"
 "                                      gpio    routage analogique de la carte\n"
@@ -285,6 +287,38 @@ static void report_test(const struct probe_stats *s, const em_config *cfg)
 }
 
 /* ------------------------------------------------------------------ */
+/* `raw` : que contiennent vraiment les paquets USB ?                  */
+/*                                                                     */
+/* Toutes les mesures precedentes portent sur la trame reassemblee.    */
+/* Si elle est vide, deux explications restent : le boitier envoie des */
+/* zeros, ou le reassemblage jette les donnees. Seul le flux brut      */
+/* permet de trancher.                                                 */
+/* ------------------------------------------------------------------ */
+
+struct raw_state {
+    int shown;
+    int to_show;
+};
+
+static void on_raw_packet(const uint8_t *data, int len, void *user)
+{
+    struct raw_state *s = user;
+    if (s->shown >= s->to_show)
+        return;
+
+    int nonzero = 0;
+    for (int i = 0; i < len; i++)
+        if (data[i])
+            nonzero++;
+
+    printf("  paquet %3d : %4d o, %5d non nuls  |", s->shown, len, nonzero);
+    for (int i = 0; i < 16 && i < len; i++)
+        printf(" %02x", data[i]);
+    printf("\n");
+    s->shown++;
+}
+
+/* ------------------------------------------------------------------ */
 /* `sweep` : balayage d'un registre en mesurant les pixels recus       */
 /*                                                                     */
 /* On garde un seul flux ouvert et on change le registre en cours de   */
@@ -416,7 +450,8 @@ int main(int argc, char **argv)
         return 0;
     }
     if (strcmp(cmd, "probe") && strcmp(cmd, "stream") &&
-        strcmp(cmd, "test") && strcmp(cmd, "inputs") && strcmp(cmd, "sweep")) {
+        strcmp(cmd, "test") && strcmp(cmd, "inputs") &&
+        strcmp(cmd, "sweep") && strcmp(cmd, "raw")) {
         fprintf(stderr, "commande inconnue: %s\n\n", cmd);
         usage(stderr);
         return 2;
@@ -537,6 +572,11 @@ int main(int argc, char **argv)
     }
 
     char err[512] = "";
+    /* Compter les octets non nuls coute une passe sur 20 Mo/s : reserve au
+     * diagnostic, jamais pendant un enregistrement. */
+    if (!strcmp(cmd, "raw"))
+        cfg.detailed_stats = true;
+
     em_device *dev = em_open(ctx, vid, pid, &cfg, err, sizeof(err));
     if (!dev) {
         fprintf(stderr, "%s\n", err);
@@ -628,6 +668,72 @@ int main(int argc, char **argv)
         }
         /* Remettre l'entree demandee avant de rendre la main. */
         saa711x_set_input(dev, addr, cfg.input);
+        goto done;
+    }
+
+    if (!strcmp(cmd, "raw")) {
+        struct raw_state rs = { 0, 24 };
+        struct sink sink;
+        memset(&sink, 0, sizeof(sink));
+        sink.f = fopen("/dev/null", "wb");
+        sink.dev = dev;
+        sink.max_frames = (uint64_t)(max_frames > 0 ? max_frames : 10);
+        if (!sink.f) {
+            fprintf(stderr, "impossible d'ouvrir /dev/null\n");
+            status = 1;
+            goto done;
+        }
+
+        printf("Premiers paquets isochrones recus (16 premiers octets) :\n");
+        em_set_packet_cb(dev, on_raw_packet, &rs);
+        if (em_stream(dev, on_frame, &sink, err, sizeof(err)) < 0) {
+            fprintf(stderr, "%s\n", err);
+            status = 1;
+        }
+        fclose(sink.f);
+
+        const em_stats *st = em_get_stats(dev);
+        printf("\n--- Flux brut ---\n");
+        printf("Paquets isochrones      : %llu recus, %llu non vides\n",
+               (unsigned long long)st->iso_packets,
+               (unsigned long long)st->iso_packets_ok);
+        printf("  en-tete video (22 5a) : %llu\n", (unsigned long long)st->header_video);
+        printf("  en-tete VBI   (33 95) : %llu\n", (unsigned long long)st->header_vbi);
+        printf("  sans en-tete          : %llu\n", (unsigned long long)st->header_other);
+        printf("Octets recus            : %llu\n", (unsigned long long)st->bytes);
+        printf("Octets non nuls recus   : %llu (%.2f %%)\n",
+               (unsigned long long)st->nonzero,
+               st->bytes ? 100.0 * (double)st->nonzero / (double)st->bytes : 0.0);
+        printf("Octets copies en trame  : %llu\n", (unsigned long long)st->copied);
+        printf("Octets hors cadre       : %llu\n", (unsigned long long)st->dropped);
+        printf("Trames assemblees       : %llu\n", (unsigned long long)st->frames);
+
+        printf("\nVerdict : ");
+        if (st->bytes == 0) {
+            printf("le boitier n'envoie aucune donnee.\n");
+        } else if (st->nonzero * 20 < st->bytes) {
+            printf("LE BOITIER ENVOIE DES ZEROS.\n"
+                   "  %.2f %% seulement des octets recus sont non nuls. Le probleme est\n"
+                   "  en amont du reassemblage : le pont USB ne recoit pas de pixels du\n"
+                   "  decodeur analogique. Le reassemblage, lui, fonctionne (%llu octets\n"
+                   "  recus, %llu copies, %llu perdus).\n",
+                   100.0 * (double)st->nonzero / (double)st->bytes,
+                   (unsigned long long)st->bytes,
+                   (unsigned long long)st->copied,
+                   (unsigned long long)st->dropped);
+        } else if (st->copied * 2 < st->bytes) {
+            printf("LES DONNEES SONT JETEES AU REASSEMBLAGE.\n"
+                   "  Le boitier envoie de vraies donnees (%.2f %% d'octets non nuls)\n"
+                   "  mais seuls %llu octets sur %llu finissent dans une trame.\n"
+                   "  Le defaut est dans mon code, envoyez-moi cette sortie.\n",
+                   100.0 * (double)st->nonzero / (double)st->bytes,
+                   (unsigned long long)st->copied,
+                   (unsigned long long)st->bytes);
+        } else {
+            printf("DONNEES PRESENTES ET CORRECTEMENT ASSEMBLEES.\n"
+                   "  %.2f %% d'octets non nuls recus et copies : il y a une image.\n",
+                   100.0 * (double)st->nonzero / (double)st->bytes);
+        }
         goto done;
     }
 

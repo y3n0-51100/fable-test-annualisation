@@ -59,6 +59,8 @@ struct em_device {
     em_frame_cb cb;
     void    *cb_user;
     int      cb_rc;
+    em_packet_cb packet_cb;
+    void    *packet_user;
 
     em_stats stats;
 };
@@ -378,6 +380,12 @@ const em_stats *em_get_stats(em_device *dev)
     return &dev->stats;
 }
 
+void em_set_packet_cb(em_device *dev, em_packet_cb cb, void *user)
+{
+    dev->packet_cb = cb;
+    dev->packet_user = user;
+}
+
 /* ------------------------------------------------------------------ */
 /* Introspection                                                      */
 /* ------------------------------------------------------------------ */
@@ -638,6 +646,7 @@ static void copy_field_data(em_device *dev, const uint8_t *src, size_t len)
         if (chunk > len)
             chunk = len;
         memcpy(dev->frame + dst_line * dev->line_bytes + in_line, src, chunk);
+        dev->stats.copied += chunk;
         src += chunk;
         len -= chunk;
         dev->field_pos += chunk;
@@ -654,6 +663,7 @@ static void process_packet(em_device *dev, const uint8_t *data, int len)
         return;
 
     if (data[0] == 0x22 && data[1] == 0x5a) {
+        dev->stats.header_video++;
         int field = data[2] & 0x01;
         if (field == 0) {
             /* A new top field means the previous frame is complete. */
@@ -664,10 +674,13 @@ static void process_packet(em_device *dev, const uint8_t *data, int len)
         data += 4;
         len -= 4;
     } else if (data[0] == 0x33 && data[1] == 0x95) {
+        dev->stats.header_vbi++;
         return;             /* VBI field, not useful for plain capture */
     } else if (data[0] == 0x88 && data[1] == 0x88 &&
                data[2] == 0x88 && data[3] == 0x88) {
         return;             /* EM25xx style header, unused here */
+    } else {
+        dev->stats.header_other++;
     }
 
     if (len > 0)
@@ -691,8 +704,17 @@ static void LIBUSB_CALL iso_callback(struct libusb_transfer *xfr)
             continue;
         dev->stats.iso_packets_ok++;
         dev->stats.bytes += pkt->actual_length;
-        process_packet(dev, libusb_get_iso_packet_buffer_simple(xfr, i),
-                       (int)pkt->actual_length);
+
+        const uint8_t *payload = libusb_get_iso_packet_buffer_simple(xfr, i);
+        if (dev->cfg.detailed_stats) {
+            for (unsigned k = 0; k < pkt->actual_length; k++)
+                if (payload[k])
+                    dev->stats.nonzero++;
+        }
+        if (dev->packet_cb)
+            dev->packet_cb(payload, (int)pkt->actual_length, dev->packet_user);
+
+        process_packet(dev, payload, (int)pkt->actual_length);
     }
 
     if (dev->stop || dev->cb_rc != 0) {
