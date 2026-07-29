@@ -60,6 +60,9 @@ try() {
 echo "Balayage des reglages du decodeur (norme $standard, $FRAMES trames par essai)."
 echo "Magnetoscope en lecture ? C'est indispensable."
 echo
+echo "Si vous ne l'avez pas encore fait, lancez d'abord 'build/dvc100 inputs' :"
+echo "c'est instantane et cela designe directement l'entree analogique cablee."
+echo
 
 echo "1. Entree analogique (registre 0x02 du decodeur) :"
 for mux in 0xc0 0xc1 0xc2 0xc3 0xc4 0xc5 0xc6 0xc7; do
@@ -74,7 +77,7 @@ done
 
 echo
 echo "3. Sortie numerique du decodeur (registre 0x11) :"
-for out in 0x0c 0x1c 0x0d 0x00; do
+for out in 0x0c 0x1c 0x2c 0x3c 0x0d 0x1d 0x10 0x00; do
     try "sortie $out" --i2c-set "0x11=$out"
 done
 

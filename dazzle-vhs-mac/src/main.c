@@ -35,6 +35,8 @@ static void usage(FILE *out)
 "\n"
 "Usage :\n"
 "  dvc100 probe [options]            identifie le boitier, dump registres + I2C\n"
+"  dvc100 inputs [options]           demande au decodeur sur quelle entree\n"
+"                                    analogique il voit un signal (3 secondes)\n"
 "  dvc100 test  [options]            capture quelques trames et dit ce qu'elles\n"
 "                                    contiennent (vide / noir / vraie image)\n"
 "  dvc100 stream [options]           sort des trames YUYV brutes sur stdout\n"
@@ -132,6 +134,10 @@ struct probe_stats {
     uint8_t *previous;
     size_t   previous_len;
     uint64_t changed_bytes;
+    /* which lines actually carry data, for the last frame analysed */
+    size_t   line_bytes;
+    int      height;
+    unsigned *line_nonzero;
 };
 
 static int on_test_frame(const uint8_t *data, size_t len, void *user)
@@ -164,6 +170,21 @@ static int on_test_frame(const uint8_t *data, size_t len, void *user)
     if (s->previous && s->previous_len == len)
         memcpy(s->previous, data, len);
 
+    /* Per-line census: "quelques lignes seulement" and "rien du tout" are two
+     * very different faults, and the average hides the difference. */
+    if (s->line_nonzero && s->line_bytes) {
+        for (int line = 0; line < s->height; line++) {
+            size_t start = (size_t)line * s->line_bytes;
+            if (start + s->line_bytes > len)
+                break;
+            unsigned count = 0;
+            for (size_t i = 0; i < s->line_bytes; i++)
+                if (data[start + i])
+                    count++;
+            s->line_nonzero[line] = count;
+        }
+    }
+
     s->frames++;
     fprintf(stderr, "\rtrames analysees : %llu/%llu",
             (unsigned long long)s->frames, (unsigned long long)s->wanted);
@@ -192,13 +213,39 @@ static void report_test(const struct probe_stats *s, const em_config *cfg)
     printf("Chrominance (U/V)  : min %u, max %u\n", s->c_min, s->c_max);
     printf("Variation d'une trame a l'autre : %.2f %% des octets\n", changed);
 
+    /* Carte des lignes : un '#' par tranche de lignes bien remplie. */
+    if (s->line_nonzero && s->height > 0) {
+        int filled = 0;
+        printf("\nLignes contenant des donnees (une case = %d lignes) :\n  ",
+               s->height / 48 > 0 ? s->height / 48 : 1);
+        int bucket = s->height / 48 > 0 ? s->height / 48 : 1;
+        for (int line = 0; line < s->height; line += bucket) {
+            unsigned sum = 0;
+            for (int k = line; k < line + bucket && k < s->height; k++)
+                sum += s->line_nonzero[k];
+            double fill = (double)sum / (double)(s->line_bytes * (size_t)bucket);
+            if (fill > 0.5)      { printf("#"); filled++; }
+            else if (fill > 0.05) { printf("+"); filled++; }
+            else                  printf(".");
+        }
+        printf("\n  (# = pleine, + = partielle, . = vide ; ligne 0 a gauche)\n");
+    }
+
     printf("\nVerdict : ");
-    if (nonzero < 0.5) {
-        printf("TRAMES VIDES.\n"
-               "  Le pont USB envoie bien des trames, mais elles ne contiennent que\n"
-               "  des zeros : le decodeur analogique ne lui fournit aucun pixel.\n"
-               "  C'est un probleme de configuration du decodeur, pas de branchement.\n"
-               "  Essayez : scripts/tune.sh   (balayage des reglages du decodeur)\n");
+    if (nonzero < 5.0) {
+        printf("TRAMES QUASI VIDES (%.2f %% d'octets non nuls seulement).\n", nonzero);
+        printf("  Le pont USB envoie des trames bien cadencees, mais le decodeur\n"
+               "  analogique ne lui fournit pratiquement aucun pixel.\n"
+               "  Verifiez d'abord la ligne \"signal video\" ci-dessous : si elle dit\n"
+               "  ABSENT, aucun reglage logiciel n'y changera rien, il faut d'abord\n"
+               "  que le decodeur voie le signal du magnetoscope.\n"
+               "    1. cassette en LECTURE, bande qui defile ;\n"
+               "    2. build/dvc100 inputs   -> quelle entree analogique est cablee ;\n"
+               "    3. scripts/tune.sh       -> balayage complet des reglages.\n");
+    } else if (y_mean < 8) {
+        printf("PAS DE LUMINANCE (Y moyen %u).\n", y_mean);
+        printf("  Des donnees arrivent mais l'image est noire au sens strict.\n"
+               "  Lancez build/dvc100 inputs pour trouver l'entree analogique cablee.\n");
     } else if (s->y_max - s->y_min < 8 && changed < 0.5) {
         printf("IMAGE UNIFORME (Y autour de %u).\n", y_mean);
         if (y_mean >= 10 && y_mean <= 40) {
@@ -209,6 +256,10 @@ static void report_test(const struct probe_stats *s, const em_config *cfg)
             printf("  Le decodeur sort une valeur constante : reglage a ajuster.\n"
                    "  Essayez : scripts/tune.sh\n");
         }
+    } else if (changed < 0.5) {
+        printf("IMAGE FIXE.\n"
+               "  Il y a du contenu, mais rien ne bouge d'une trame a l'autre :\n"
+               "  bande a l'arret, ou mire. Mettez la cassette en lecture et relancez.\n");
     } else {
         printf("IMAGE REELLE DETECTEE.\n"
                "  Les trames contiennent une vraie image qui evolue dans le temps.\n"
@@ -247,7 +298,8 @@ int main(int argc, char **argv)
         usage(stdout);
         return 0;
     }
-    if (strcmp(cmd, "probe") && strcmp(cmd, "stream") && strcmp(cmd, "test")) {
+    if (strcmp(cmd, "probe") && strcmp(cmd, "stream") &&
+        strcmp(cmd, "test") && strcmp(cmd, "inputs")) {
         fprintf(stderr, "commande inconnue: %s\n\n", cmd);
         usage(stderr);
         return 2;
@@ -399,17 +451,84 @@ int main(int argc, char **argv)
     for (int i = 0; i < n_overrides; i++)
         em_write_reg(dev, overrides[i].reg, overrides[i].val);
 
+    /* Which analog input is the yellow RCA actually wired to? The decoder
+     * answers that itself: point it at each input in turn and ask whether it
+     * locked onto a video signal. Three seconds, no streaming needed. */
+    if (!strcmp(cmd, "inputs")) {
+        uint8_t addr = 0;
+        int version = 0;
+        if (saa711x_detect(dev, &addr, &version) < 0) {
+            fprintf(stderr, "decodeur introuvable sur le bus I2C\n");
+            status = 1;
+            goto done;
+        }
+        printf("Decodeur %s a l'adresse 0x%02x.\n", saa711x_model(version), addr);
+        printf("La cassette doit etre EN LECTURE pendant ce test.\n\n");
+
+        int found = 0;
+        for (int mode = 0; mode < 16; mode++) {
+            uint8_t val = (uint8_t)(0xc0 | mode);
+            em_i2c_write_reg(dev, addr, 0x02, val);
+            /* Modes 6 et au-dela = Y/C separes : contourner la trappe chroma. */
+            em_i2c_write_reg(dev, addr, 0x09, mode >= 6 ? 0x80 : 0x01);
+            usleep(400000);
+            int st = em_i2c_read_reg(dev, addr, 0x1f);
+            const char *verdict;
+            if (st < 0)
+                verdict = "lecture impossible";
+            else if (st & 0x40)
+                verdict = "pas de signal";
+            else {
+                verdict = "SIGNAL VERROUILLE";
+                found++;
+            }
+            printf("  mode %2d  (0x02 = 0x%02x, %s) : %s",
+                   mode, val, mode >= 6 ? "Y/C  " : "CVBS ", verdict);
+            if (st >= 0)
+                printf("   [statut 0x%02x, %s]", st, (st & 0x20) ? "60 Hz" : "50 Hz");
+            printf("\n");
+        }
+
+        printf("\n");
+        if (found) {
+            printf("Utilisez le mode verrouille ci-dessus, par exemple :\n"
+                   "  build/dvc100 test --i2c-set 0x02=0xcX\n"
+                   "en remplacant X par le numero du mode qui a repondu.\n");
+        } else {
+            printf("Aucune entree ne voit de signal. Dans l'ordre :\n"
+                   "  1. la cassette defile-t-elle vraiment (touche LECTURE) ?\n"
+                   "  2. la fiche jaune est-elle sur la sortie VIDEO OUT du\n"
+                   "     magnetoscope, et non sur une entree ?\n"
+                   "  3. le cable fonctionne-t-il (essayez-le sur un televiseur) ?\n");
+        }
+        /* Remettre l'entree demandee avant de rendre la main. */
+        saa711x_set_input(dev, addr, cfg.input);
+        goto done;
+    }
+
     if (!strcmp(cmd, "test")) {
         struct probe_stats ps;
         memset(&ps, 0, sizeof(ps));
         ps.wanted = (uint64_t)(max_frames > 0 ? max_frames : 25);
         ps.y_min = ps.c_min = 255;
+        ps.line_bytes = (size_t)em_config_width(&cfg) * 2;
+        ps.height = em_config_height(&cfg);
+        ps.line_nonzero = calloc((size_t)ps.height, sizeof(*ps.line_nonzero));
         if (em_stream(dev, on_test_frame, &ps, err, sizeof(err)) < 0) {
             fprintf(stderr, "\n%s\n", err);
             status = 1;
         }
         report_test(&ps, &cfg);
+
+        /* Le statut du decodeur est l'information la plus utile du lot :
+         * l'afficher juste apres le verdict evite d'aller la chercher. */
+        uint8_t addr = 0;
+        printf("\n");
+        if (saa711x_detect(dev, &addr, NULL) == 0)
+            saa711x_status(dev, addr, stdout);
+
         free(ps.previous);
+        free(ps.line_nonzero);
         goto done;
     }
 
