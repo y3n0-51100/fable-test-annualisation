@@ -77,7 +77,15 @@ app: $(BIN)
 		echo "xcrun introuvable : lancez 'xcode-select --install'"; exit 1; }
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(APP_BUNDLE)/Contents/MacOS $(APP_BUNDLE)/Contents/Resources
-	xcrun swiftc -O -swift-version 5 -parse-as-library \
+	@echo "Compilation de l'interface : comptez une a trois minutes, sans"
+	@echo "aucun affichage pendant ce temps. C'est normal, laissez tourner."
+	@echo "Si rien n'a abouti au bout de dix minutes, Ctrl-C et signalez-le :"
+	@echo "les avertissements ci-dessous designent les expressions trop lentes."
+	@# Pas de -O : l'optimiseur triple le temps de compilation pour un gain
+	@# nul ici, tout le travail lourd etant fait par dvc100 et ffmpeg.
+	xcrun swiftc -swift-version 5 -parse-as-library \
+		-Xfrontend -warn-long-function-bodies=2000 \
+		-Xfrontend -warn-long-expression-type-checking=2000 \
 		-sdk "$$(xcrun --show-sdk-path --sdk macosx)" \
 		-target $(ARCH)-apple-macos$(MACOS_MIN) \
 		-framework SwiftUI -framework AppKit \

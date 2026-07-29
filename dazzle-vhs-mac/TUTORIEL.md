@@ -210,6 +210,11 @@ si l'étape suivante échoue, vous pouvez **déjà numériser vos cassettes** av
 make app
 ```
 
+**Cette étape ne montre rien pendant une à trois minutes** : le compilateur
+travaille en silence. Ce n'est pas un blocage. Si au bout de dix minutes rien
+ne s'est passé, faites `Ctrl+C` et signalez-le moi — l'application n'est qu'un
+confort, la numérisation fonctionne sans elle (étape 9 bis).
+
 À la fin :
 
 ```
@@ -398,6 +403,7 @@ majorité des cas.
 | **L'image reste noire** | Le magnétoscope est-il vraiment en **Lecture** (bande qui défile) ? La fiche **jaune** est-elle sur la sortie **OUT** du magnétoscope ? |
 | **Écran vert ou noir, mais le compteur de trames monte** | Le boîtier fonctionne, c'est le décodeur analogique qui n'est pas réglé. Dans le Terminal : `build/dvc100 test` pour savoir ce que contiennent les images, puis `scripts/tune.sh` (magnétoscope en lecture) pour trouver le bon réglage automatiquement. Envoyez-moi la sortie des deux. |
 | **Image en noir et blanc** | Mauvaise norme couleur : dans l'app, passez de **PAL** à **SECAM** (ou l'inverse). |
+| **`make app` semble bloqué** | Une à trois minutes sans affichage est normal. Au-delà de dix minutes, `Ctrl+C` : vous n'avez pas besoin de l'application, `build/dvc100` et `scripts/record.sh` suffisent pour numériser (étape 9 bis). Envoyez-moi les avertissements affichés, ils désignent la cause. |
 | **`error: 'app': Invalid manifest` / `no such module 'PackageDescription'`** | Chaîne d'outils Swift incomplète. La version actuelle du projet n'utilise plus Swift Package Manager : re-téléchargez le dossier (étape 5) et relancez `make app`. |
 | **« Outil dvc100 introuvable »** | L'app a été lancée sans avoir été construite : refaites l'étape 6. |
 | **« ffmpeg introuvable »** | Refaites l'étape 4 : `brew install ffmpeg`. |

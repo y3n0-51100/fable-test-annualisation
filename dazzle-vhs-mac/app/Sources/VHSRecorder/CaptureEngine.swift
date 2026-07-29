@@ -205,8 +205,8 @@ final class CaptureEngine: ObservableObject {
             "/opt/homebrew/bin/\(name)",
             "/usr/local/bin/\(name)",
             "/usr/bin/\(name)",
-            FileManager.default.currentDirectoryPath + "/build/\(name)",
-            FileManager.default.currentDirectoryPath + "/\(name)",
+            "\(FileManager.default.currentDirectoryPath)/build/\(name)",
+            "\(FileManager.default.currentDirectoryPath)/\(name)",
         ]
         for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
             return path
@@ -244,8 +244,7 @@ final class CaptureEngine: ObservableObject {
             }
         case .denied, .restricted:
             audioDevices = []
-            audioProblem = "Acces au micro refuse. Reglages Systeme > "
-                + "Confidentialite et securite > Microphone > activez VHS Recorder."
+            audioProblem = "Acces au micro refuse. Reglages Systeme > Confidentialite et securite > Microphone > activez VHS Recorder."
         default:
             listAudioDevices()
         }
@@ -267,8 +266,7 @@ final class CaptureEngine: ObservableObject {
 
         audioDevices = devices
         if devices.isEmpty {
-            audioProblem = "Aucune entree audio detectee. Le boitier n'expose "
-                + "peut-etre pas son son a macOS : voir la section audio du README."
+            audioProblem = "Aucune entree audio detectee. Le boitier n'expose peut-etre pas son son a macOS : voir la section audio du README."
         } else {
             audioProblem = nil
             let known = devices.contains { $0.name == audioDeviceName }
@@ -283,8 +281,10 @@ final class CaptureEngine: ObservableObject {
                 audioDeviceName = (capture ?? devices.first)?.name
             }
         }
-        appendLog("entrees audio : " + (devices.isEmpty
-            ? "aucune" : devices.map { $0.name }.joined(separator: ", ")))
+        let names: String = devices.isEmpty
+            ? "aucune"
+            : devices.map { $0.name }.joined(separator: ", ")
+        appendLog("entrees audio : \(names)")
     }
 
     private func ffmpegAudioDevices() -> [AudioDevice] {
@@ -468,7 +468,7 @@ final class CaptureEngine: ObservableObject {
             guard !data.isEmpty,
                   let text = String(data: data, encoding: .utf8),
                   let engine = self else { return }
-            DispatchQueue.main.async { engine.appendLog("ffmpeg: " + text) }
+            DispatchQueue.main.async { engine.appendLog("ffmpeg: \(text)") }
         }
 
         do {
@@ -488,9 +488,9 @@ final class CaptureEngine: ObservableObject {
         preventSleep(true)
 
         if let limit = recordingLimit {
-            status = "Enregistrement vers \(url.lastPathComponent)"
-                + " - arret automatique dans \(CaptureEngine.duration(limit))"
-            appendLog("arret automatique programme apres \(CaptureEngine.duration(limit))")
+            let countdown = CaptureEngine.duration(limit)
+            status = "Enregistrement vers \(url.lastPathComponent) - arret automatique dans \(countdown)"
+            appendLog("arret automatique programme apres \(countdown)")
         } else {
             status = "Enregistrement vers \(url.lastPathComponent)"
         }

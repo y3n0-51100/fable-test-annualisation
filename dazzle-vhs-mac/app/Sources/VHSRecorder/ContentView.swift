@@ -26,6 +26,23 @@ struct ContentView: View {
         RecordingLimit(rawValue: limitRaw) ?? .unlimited
     }
 
+    // Textes d'aide sortis des vues, et explicitement typés. Une chaîne
+    // assemblée avec des `+` à l'intérieur d'un ViewBuilder fait exploser le
+    // temps de compilation des anciens Swift — au point de paraître figé.
+    private static let autoStopHelp: String = """
+        L'enregistrement s'arrete tout seul et le fichier est referme \
+        proprement. Le Mac est empeche de s'endormir pendant ce temps.
+        """
+
+    private static let troubleshootingHelp: String = """
+        Image noire ou verte alors que le compteur de trames monte ? Le \
+        boitier fonctionne, c'est le decodeur analogique qui n'est pas regle. \
+        Dans le Terminal, depuis le dossier du projet :
+          build/dvc100 test
+        puis, s'il annonce des trames vides :
+          scripts/tune.sh
+        """
+
     private var outputFolder: URL {
         outputFolderPath.isEmpty
             ? FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
@@ -199,11 +216,10 @@ struct ContentView: View {
                         }
                     }
                     if limit != .unlimited {
-                        Text("L'enregistrement s'arrete tout seul et le fichier est "
-                             + "referme proprement. Le Mac est empeche de s'endormir "
-                             + "pendant ce temps.")
+                        Text(ContentView.autoStopHelp)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Picker("Qualite", selection: $qualityRaw) {
@@ -261,12 +277,7 @@ struct ContentView: View {
                 section("Diagnostic") {
                     labelled("dvc100", engine.captureToolPath ?? "introuvable")
                     labelled("ffmpeg", engine.ffmpegPath ?? "introuvable - brew install ffmpeg")
-                    Text("Image noire ou verte alors que le compteur de trames monte ? "
-                         + "Le boitier fonctionne, c'est le decodeur analogique qui n'est "
-                         + "pas regle. Dans le Terminal, depuis le dossier du projet :\n"
-                         + "  build/dvc100 test\n"
-                         + "puis, s'il annonce des trames vides :\n"
-                         + "  scripts/tune.sh")
+                    Text(ContentView.troubleshootingHelp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
