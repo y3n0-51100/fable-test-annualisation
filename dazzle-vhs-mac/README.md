@@ -196,18 +196,34 @@ magnétoscopes ne sortent aucun signal). Puis essayez une autre bande passante
 isochrone : `--alt 5`, `--alt 6`, `--alt 7`. Sur les Mac récents, branchez le
 boîtier directement, pas derrière un hub ou un écran.
 
-**Image noire mais des trames arrivent**
-Le pont fonctionne, c'est le décodeur analogique qui n'est pas configuré comme
-sur votre carte. Essayez `--input svideo`, puis modifiez la table
-d'initialisation sans recompiler :
+**Image noire ou verte alors que les trames arrivent**
+Le pont USB fonctionne — c'est déjà l'essentiel — et c'est le décodeur
+analogique qui ne fournit pas de pixels. Diagnostiquez d'abord :
 
 ```bash
-cat > decodeur.txt <<'EOF'
-0x02 = 0xc1     # essayer c0, c1, c2… : sélection de l'entrée analogique
-0x09 = 0x01
-0x0e = 0x01
-EOF
-build/dvc100 stream --i2c-init decodeur.txt --stats > /dev/null
+build/dvc100 test
+```
+
+Il capture quelques trames et dit ce qu'elles contiennent : **trames vides**
+(le décodeur n'envoie rien), **image uniforme** (chaîne numérique bonne, pas de
+signal analogique — magnétoscope à l'arrêt ?) ou **image réelle** (la capture
+marche, le problème est ailleurs). Il affiche aussi la commande pour convertir
+une trame en PNG et la regarder.
+
+S'il annonce des trames vides, lancez le balayage automatique, magnétoscope en
+lecture :
+
+```bash
+scripts/tune.sh
+```
+
+Il essaie une vingtaine de configurations du décodeur — entrée analogique,
+S-Video, format de sortie — et indique celle qui produit une image. Un réglage
+isolé peut aussi se forcer à la main :
+
+```bash
+build/dvc100 test --i2c-set 0x02=0xc1     # sélection de l'entrée analogique
+build/dvc100 test --i2c-set 0x11=0x1c     # sortie numérique du décodeur
 ```
 
 **Image en noir et blanc**

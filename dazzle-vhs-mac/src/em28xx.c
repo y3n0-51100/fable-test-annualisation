@@ -561,6 +561,9 @@ int em_configure(em_device *dev, char *err, size_t errlen)
                 fprintf(stderr, "attention: init du decodeur incomplete: %s\n", derr);
             saa711x_set_standard(dev, addr, dev->cfg.standard);
             saa711x_set_input(dev, addr, dev->cfg.input);
+            for (int i = 0; i < dev->cfg.n_i2c_set; i++)
+                em_i2c_write_reg(dev, addr, dev->cfg.i2c_set[i].reg,
+                                 dev->cfg.i2c_set[i].val);
         } else {
             fprintf(stderr,
                     "attention: aucun decodeur SAA711x detecte sur le bus I2C.\n"

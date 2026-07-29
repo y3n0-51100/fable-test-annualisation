@@ -396,6 +396,7 @@ majorité des cas.
 | Ce que vous voyez | Ce qu'il faut faire |
 |---|---|
 | **L'image reste noire** | Le magnétoscope est-il vraiment en **Lecture** (bande qui défile) ? La fiche **jaune** est-elle sur la sortie **OUT** du magnétoscope ? |
+| **Écran vert ou noir, mais le compteur de trames monte** | Le boîtier fonctionne, c'est le décodeur analogique qui n'est pas réglé. Dans le Terminal : `build/dvc100 test` pour savoir ce que contiennent les images, puis `scripts/tune.sh` (magnétoscope en lecture) pour trouver le bon réglage automatiquement. Envoyez-moi la sortie des deux. |
 | **Image en noir et blanc** | Mauvaise norme couleur : dans l'app, passez de **PAL** à **SECAM** (ou l'inverse). |
 | **`error: 'app': Invalid manifest` / `no such module 'PackageDescription'`** | Chaîne d'outils Swift incomplète. La version actuelle du projet n'utilise plus Swift Package Manager : re-téléchargez le dossier (étape 5) et relancez `make app`. |
 | **« Outil dvc100 introuvable »** | L'app a été lancée sans avoir été construite : refaites l'étape 6. |

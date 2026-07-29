@@ -35,6 +35,8 @@ static void usage(FILE *out)
 "\n"
 "Usage :\n"
 "  dvc100 probe [options]            identifie le boitier, dump registres + I2C\n"
+"  dvc100 test  [options]            capture quelques trames et dit ce qu'elles\n"
+"                                    contiennent (vide / noir / vraie image)\n"
 "  dvc100 stream [options]           sort des trames YUYV brutes sur stdout\n"
 "\n"
 "Options principales :\n"
@@ -54,6 +56,8 @@ static void usage(FILE *out)
 "  --xclk 0xXX --i2c-clk 0xXX  horloges du pont\n"
 "  --transfers N --packets N   profondeur du pipeline USB (defaut 8 x 64)\n"
 "  --i2c-init FICHIER          table d'init du decodeur (lignes \"reg=valeur\")\n"
+"  --i2c-set REG=VAL           ecrire un registre du decodeur apres init\n"
+"                              (repetable ; c'est ce que balaye scripts/tune.sh)\n"
 "  --skip-decoder              ne pas toucher au decodeur analogique\n"
 "  --reg REG=VAL               ecrire un registre du pont apres configuration\n"
 "                              (repetable, jusqu'a 16 fois)\n"
@@ -111,6 +115,116 @@ static int on_frame(const uint8_t *data, size_t len, void *user)
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* `test` : are the frames carrying an actual picture?                 */
+/* ------------------------------------------------------------------ */
+
+struct probe_stats {
+    uint64_t frames;
+    uint64_t wanted;
+    uint64_t nonzero_bytes;
+    uint64_t total_bytes;
+    unsigned y_min, y_max;
+    unsigned c_min, c_max;
+    uint64_t y_sum;
+    uint64_t y_count;
+    /* movement between two consecutive frames */
+    uint8_t *previous;
+    size_t   previous_len;
+    uint64_t changed_bytes;
+};
+
+static int on_test_frame(const uint8_t *data, size_t len, void *user)
+{
+    struct probe_stats *s = user;
+
+    for (size_t i = 0; i + 1 < len; i += 2) {
+        unsigned y = data[i];
+        unsigned c = data[i + 1];
+        if (y) s->nonzero_bytes++;
+        if (c) s->nonzero_bytes++;
+        if (y < s->y_min) s->y_min = y;
+        if (y > s->y_max) s->y_max = y;
+        if (c < s->c_min) s->c_min = c;
+        if (c > s->c_max) s->c_max = c;
+        s->y_sum += y;
+        s->y_count++;
+    }
+    s->total_bytes += len;
+
+    if (s->previous && s->previous_len == len) {
+        for (size_t i = 0; i < len; i++)
+            if (s->previous[i] != data[i])
+                s->changed_bytes++;
+    }
+    if (!s->previous) {
+        s->previous = malloc(len);
+        s->previous_len = len;
+    }
+    if (s->previous && s->previous_len == len)
+        memcpy(s->previous, data, len);
+
+    s->frames++;
+    fprintf(stderr, "\rtrames analysees : %llu/%llu",
+            (unsigned long long)s->frames, (unsigned long long)s->wanted);
+    fflush(stderr);
+    return s->frames >= s->wanted ? 1 : 0;
+}
+
+static void report_test(const struct probe_stats *s, const em_config *cfg)
+{
+    printf("\n\n--- Analyse du contenu ---\n");
+    if (s->frames == 0) {
+        printf("Aucune trame recue : le boitier n'envoie rien du tout.\n");
+        return;
+    }
+
+    double nonzero = 100.0 * (double)s->nonzero_bytes / (double)(s->total_bytes ? s->total_bytes : 1);
+    double changed = 100.0 * (double)s->changed_bytes /
+                     (double)(s->previous_len * (s->frames > 1 ? s->frames - 1 : 1));
+    unsigned y_mean = (unsigned)(s->y_count ? s->y_sum / s->y_count : 0);
+
+    printf("Trames             : %llu de %zu octets\n",
+           (unsigned long long)s->frames, s->previous_len);
+    printf("Octets non nuls    : %.2f %%\n", nonzero);
+    printf("Luminance (Y)      : min %u, max %u, moyenne %u\n",
+           s->y_min, s->y_max, y_mean);
+    printf("Chrominance (U/V)  : min %u, max %u\n", s->c_min, s->c_max);
+    printf("Variation d'une trame a l'autre : %.2f %% des octets\n", changed);
+
+    printf("\nVerdict : ");
+    if (nonzero < 0.5) {
+        printf("TRAMES VIDES.\n"
+               "  Le pont USB envoie bien des trames, mais elles ne contiennent que\n"
+               "  des zeros : le decodeur analogique ne lui fournit aucun pixel.\n"
+               "  C'est un probleme de configuration du decodeur, pas de branchement.\n"
+               "  Essayez : scripts/tune.sh   (balayage des reglages du decodeur)\n");
+    } else if (s->y_max - s->y_min < 8 && changed < 0.5) {
+        printf("IMAGE UNIFORME (Y autour de %u).\n", y_mean);
+        if (y_mean >= 10 && y_mean <= 40) {
+            printf("  C'est un noir propre : la chaine numerique fonctionne, mais il n'y a\n"
+                   "  pas de signal analogique en entree. Le magnetoscope est-il en LECTURE,\n"
+                   "  la fiche jaune sur sa sortie VIDEO OUT ?\n");
+        } else {
+            printf("  Le decodeur sort une valeur constante : reglage a ajuster.\n"
+                   "  Essayez : scripts/tune.sh\n");
+        }
+    } else {
+        printf("IMAGE REELLE DETECTEE.\n"
+               "  Les trames contiennent une vraie image qui evolue dans le temps.\n"
+               "  Si l'apercu de l'application reste vert, le probleme est dans son\n"
+               "  affichage, pas dans la capture : enregistrez et ouvrez le fichier.\n");
+    }
+
+    printf("\nPour voir l'image capturee :\n"
+           "  build/dvc100 stream --standard %s --frames 1 > /tmp/vhs.yuv && \\\n"
+           "  ffmpeg -y -f rawvideo -pix_fmt yuyv422 -s %dx%d -i /tmp/vhs.yuv \\\n"
+           "         -frames:v 1 /tmp/vhs.png && open /tmp/vhs.png\n",
+           cfg->standard == EM_STD_NTSC ? "ntsc" :
+           (cfg->standard == EM_STD_SECAM ? "secam" : "pal"),
+           em_config_width(cfg), em_config_height(cfg));
+}
+
 static int parse_int(const char *s, int *out)
 {
     char *end = NULL;
@@ -133,7 +247,7 @@ int main(int argc, char **argv)
         usage(stdout);
         return 0;
     }
-    if (strcmp(cmd, "probe") && strcmp(cmd, "stream")) {
+    if (strcmp(cmd, "probe") && strcmp(cmd, "stream") && strcmp(cmd, "test")) {
         fprintf(stderr, "commande inconnue: %s\n\n", cmd);
         usage(stderr);
         return 2;
@@ -200,6 +314,17 @@ int main(int argc, char **argv)
             NEED_ARG(); cfg.i2c_init_path = next; i++;
         } else if (!strcmp(a, "--skip-decoder")) {
             cfg.skip_decoder_init = true;
+        } else if (!strcmp(a, "--i2c-set")) {
+            NEED_ARG();
+            unsigned reg, val;
+            if (sscanf(next, "%i%*[=:]%i", &reg, &val) != 2 || cfg.n_i2c_set >= 16) {
+                fprintf(stderr, "--i2c-set attend REG=VAL (max 16)\n");
+                return 2;
+            }
+            cfg.i2c_set[cfg.n_i2c_set].reg = (uint8_t)reg;
+            cfg.i2c_set[cfg.n_i2c_set].val = (uint8_t)val;
+            cfg.n_i2c_set++;
+            i++;
         } else if (!strcmp(a, "--duration")) {
             NEED_ARG(); if (parse_int(next, &duration)) return 2; i++;
         } else if (!strcmp(a, "--frames")) {
@@ -273,6 +398,20 @@ int main(int argc, char **argv)
 
     for (int i = 0; i < n_overrides; i++)
         em_write_reg(dev, overrides[i].reg, overrides[i].val);
+
+    if (!strcmp(cmd, "test")) {
+        struct probe_stats ps;
+        memset(&ps, 0, sizeof(ps));
+        ps.wanted = (uint64_t)(max_frames > 0 ? max_frames : 25);
+        ps.y_min = ps.c_min = 255;
+        if (em_stream(dev, on_test_frame, &ps, err, sizeof(err)) < 0) {
+            fprintf(stderr, "\n%s\n", err);
+            status = 1;
+        }
+        report_test(&ps, &cfg);
+        free(ps.previous);
+        goto done;
+    }
 
     struct sink sink;
     memset(&sink, 0, sizeof(sink));

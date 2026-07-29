@@ -261,12 +261,16 @@ struct ContentView: View {
                 section("Diagnostic") {
                     labelled("dvc100", engine.captureToolPath ?? "introuvable")
                     labelled("ffmpeg", engine.ffmpegPath ?? "introuvable - brew install ffmpeg")
-                    Text("Si l'image reste noire : verifiez que le magnetoscope est en "
-                         + "lecture, puis essayez l'autre norme (PAL/SECAM) et l'entree "
-                         + "S-Video. Le detail des echanges avec le boitier est dans le "
-                         + "journal.")
+                    Text("Image noire ou verte alors que le compteur de trames monte ? "
+                         + "Le boitier fonctionne, c'est le decodeur analogique qui n'est "
+                         + "pas regle. Dans le Terminal, depuis le dossier du projet :\n"
+                         + "  build/dvc100 test\n"
+                         + "puis, s'il annonce des trames vides :\n"
+                         + "  scripts/tune.sh")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(16)

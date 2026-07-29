@@ -142,6 +142,11 @@ typedef struct {
     const char *i2c_init_path;  /* optional override table for the decoder */
     bool        skip_decoder_init;
     bool        verbose;
+
+    /* Decoder registers written last, after init/standard/input. This is the
+     * knob for board-specific wiring, and what scripts/tune.sh sweeps. */
+    struct { uint8_t reg, val; } i2c_set[16];
+    int         n_i2c_set;
 } em_config;
 
 void em_config_defaults(em_config *cfg);
