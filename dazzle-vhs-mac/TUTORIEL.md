@@ -315,16 +315,27 @@ se méfie. Deux solutions :
    → L'image de votre cassette doit apparaître dans la grande zone noire.
    La première fois, macOS demandera l'autorisation d'accéder au micro
    (c'est l'entrée audio) : cliquez sur **Autoriser**.
-5. Rembobinez au début de ce que vous voulez garder, mettez en lecture, puis
-   cliquez sur **Enregistrer**. Le point devient rouge et le chronomètre
-   démarre.
-6. À la fin de la cassette, cliquez sur **Arrêter l'enregistrement**.
-   **Attendez quelques secondes** : le fichier se finalise à ce moment-là.
+5. **Durée** : si vous savez que la cassette dure 3 heures, choisissez
+   « 3 heures » (ou « Durée personnalisée » pour saisir un nombre de minutes).
+   L'enregistrement s'arrêtera **tout seul** à l'heure dite, le fichier sera
+   refermé proprement, et le Mac est empêché de s'endormir pendant ce
+   temps-là : vous pouvez lancer la cassette et partir. Laissez « Sans
+   limite » si vous préférez arrêter à la main.
+6. Rembobinez au début de ce que vous voulez garder, mettez en lecture, puis
+   cliquez sur **Enregistrer**. Le point devient rouge, le chronomètre démarre
+   et, si vous avez fixé une durée, le temps restant s'affiche à côté.
+7. À la fin, cliquez sur **Arrêter l'enregistrement** — ou ne faites rien si
+   vous avez fixé une durée. **Attendez quelques secondes** : le fichier se
+   finalise à ce moment-là.
 
-> **Empêchez le Mac de s'endormir** pendant les 2 ou 3 heures d'une cassette :
-> Réglages Système → Batterie / Économiseur d'énergie → empêcher la veille
-> automatique. Vous pouvez aussi lancer l'app depuis le Terminal avec
-> `caffeinate -i open build/VHSRecorder.app`.
+> **À propos de la veille.** L'application empêche déjà le Mac de s'endormir
+> tant qu'un enregistrement est en cours. Deux réserves : ne **rabattez pas
+> l'écran** d'un MacBook (ça endort la machine quoi qu'il arrive), et laissez-le
+> branché sur secteur pour une cassette de 3 heures. L'écran, lui, peut
+> s'éteindre sans gêner l'enregistrement.
+>
+> En ligne de commande (étape 9 bis), utilisez `caffeinate -i` devant la
+> commande, par exemple `caffeinate -i scripts/record.sh -d 10800 cassette.mp4`.
 
 ---
 

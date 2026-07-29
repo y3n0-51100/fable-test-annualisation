@@ -63,6 +63,40 @@ enum Quality: String, CaseIterable, Identifiable {
     }
 }
 
+/// Durée après laquelle l'enregistrement s'arrête tout seul.
+enum RecordingLimit: String, CaseIterable, Identifiable {
+    case unlimited, m30, h1, h90, h2, h3, h4, custom
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .unlimited: return "Sans limite (arret manuel)"
+        case .m30:       return "30 minutes"
+        case .h1:        return "1 heure"
+        case .h90:       return "1 h 30"
+        case .h2:        return "2 heures"
+        case .h3:        return "3 heures (cassette E-180)"
+        case .h4:        return "4 heures"
+        case .custom:    return "Duree personnalisee"
+        }
+    }
+
+    /// nil = pas d'arrêt automatique.
+    func seconds(customMinutes: Int) -> TimeInterval? {
+        switch self {
+        case .unlimited: return nil
+        case .m30:       return 30 * 60
+        case .h1:        return 60 * 60
+        case .h90:       return 90 * 60
+        case .h2:        return 2 * 60 * 60
+        case .h3:        return 3 * 60 * 60
+        case .h4:        return 4 * 60 * 60
+        case .custom:    return customMinutes > 0 ? Double(customMinutes) * 60 : nil
+        }
+    }
+}
+
 struct AudioDevice: Identifiable, Hashable {
     let index: Int
     let name: String
@@ -126,6 +160,8 @@ final class CaptureEngine: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var frameCount: UInt64 = 0
     @Published private(set) var recordedSeconds: Double = 0
+    /// Temps restant avant l'arrêt automatique, nil si aucune limite.
+    @Published private(set) var remainingSeconds: Double?
     @Published private(set) var recordedURL: URL?
     @Published private(set) var status: String = "Pret"
     @Published private(set) var log: [String] = []
@@ -136,6 +172,8 @@ final class CaptureEngine: ObservableObject {
     var quality: Quality = .standard
     var deinterlace = true
     var audioDeviceIndex: Int?
+    /// Arrêt automatique après ce nombre de secondes ; nil = jusqu'au clic.
+    var recordingLimit: TimeInterval?
 
     private var captureProcess: Process?
     private var ffmpegProcess: Process?
@@ -144,6 +182,7 @@ final class CaptureEngine: ObservableObject {
     private var stopRequested = false
     private var recordingStart: Date?
     private var timer: Timer?
+    private var sleepBlocker: NSObjectProtocol?
 
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private var pixelBuffer: CVPixelBuffer?
@@ -308,8 +347,13 @@ final class CaptureEngine: ObservableObject {
     }
 
     private func tick() {
-        if let start = recordingStart {
-            recordedSeconds = Date().timeIntervalSince(start)
+        guard let start = recordingStart else { return }
+        recordedSeconds = Date().timeIntervalSince(start)
+
+        guard let limit = recordingLimit else { return }
+        remainingSeconds = max(0, limit - recordedSeconds)
+        if recordedSeconds >= limit {
+            stopRecording(automatic: true)
         }
     }
 
@@ -348,7 +392,9 @@ final class CaptureEngine: ObservableObject {
                  "-preset", quality.preset,
                  "-pix_fmt", "yuv420p",
                  "-aspect", "4:3",
-                 "-movflags", "+faststart",
+                 // Pas de +faststart : sur un fichier de plusieurs heures il
+                 // impose une reecriture complete a la fermeture, pour un
+                 // benefice nul en lecture locale.
                  "-y", url.path]
 
         let proc = Process()
@@ -379,21 +425,69 @@ final class CaptureEngine: ObservableObject {
         recordedURL = url
         recordingStart = Date()
         recordedSeconds = 0
+        remainingSeconds = recordingLimit
         isRecording = true
-        status = "Enregistrement vers \(url.lastPathComponent)"
+        preventSleep(true)
+
+        if let limit = recordingLimit {
+            status = "Enregistrement vers \(url.lastPathComponent)"
+                + " - arret automatique dans \(CaptureEngine.duration(limit))"
+            appendLog("arret automatique programme apres \(CaptureEngine.duration(limit))")
+        } else {
+            status = "Enregistrement vers \(url.lastPathComponent)"
+        }
         appendLog("ffmpeg \(args.joined(separator: " "))")
     }
 
-    func stopRecording() {
+    func stopRecording(automatic: Bool = false) {
         guard isRecording else { return }
         isRecording = false
         sink.close()                 // ffmpeg sees EOF and finalises the file
-        ffmpegProcess?.waitUntilExit()
-        ffmpegProcess = nil
         recordingStart = nil
-        if let url = recordedURL {
-            status = "Enregistre : \(url.lastPathComponent)"
+        remainingSeconds = nil
+        preventSleep(false)
+
+        let name = recordedURL?.lastPathComponent ?? "le fichier"
+        guard let proc = ffmpegProcess else { return }
+        ffmpegProcess = nil
+
+        // Closing a three-hour file takes a moment; waiting for it on the main
+        // thread would leave the window frozen just as the user comes back.
+        status = "Finalisation de \(name)..."
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            proc.waitUntilExit()
+            DispatchQueue.main.async {
+                guard let engine = self else { return }
+                engine.status = automatic
+                    ? "Duree atteinte, enregistrement termine : \(name)"
+                    : "Enregistre : \(name)"
+            }
         }
+    }
+
+    /// Une cassette de 3 h ne se termine pas si le Mac s'endort au bout de
+    /// dix minutes : on bloque la veille pendant l'enregistrement.
+    private func preventSleep(_ enabled: Bool) {
+        if enabled {
+            guard sleepBlocker == nil else { return }
+            sleepBlocker = ProcessInfo.processInfo.beginActivity(
+                options: [.idleSystemSleepDisabled, .userInitiated],
+                reason: "Enregistrement d'une cassette video en cours")
+        } else if let token = sleepBlocker {
+            ProcessInfo.processInfo.endActivity(token)
+            sleepBlocker = nil
+        }
+    }
+
+    /// "3 h 00" / "45 min", pour les messages d'etat.
+    static func duration(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 {
+            return String(format: "%d h %02d", hours, minutes)
+        }
+        return "\(minutes) min"
     }
 
     func revealRecording() {

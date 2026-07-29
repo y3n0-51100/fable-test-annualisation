@@ -10,7 +10,21 @@ struct ContentView: View {
     @AppStorage("deinterlace") private var deinterlace = true
     @AppStorage("audioIndex") private var audioIndex = -1
     @AppStorage("outputFolder") private var outputFolderPath = ""
+    @AppStorage("limit") private var limitRaw = RecordingLimit.unlimited.rawValue
+    @AppStorage("customMinutes") private var customMinutes = 180
     @State private var showLog = false
+
+    private let minutesFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .none
+        formatter.minimum = 1
+        formatter.maximum = 600
+        return formatter
+    }()
+
+    private var limit: RecordingLimit {
+        RecordingLimit(rawValue: limitRaw) ?? .unlimited
+    }
 
     private var outputFolder: URL {
         outputFolderPath.isEmpty
@@ -80,6 +94,11 @@ struct ContentView: View {
             if engine.isRecording {
                 Text(timeString(engine.recordedSeconds))
                     .monospacedDigit()
+                if let remaining = engine.remainingSeconds {
+                    Text("reste \(timeString(remaining))")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
             Text("\(engine.frameCount) trames")
                 .monospacedDigit()
@@ -144,6 +163,31 @@ struct ContentView: View {
                 }
 
                 section("Enregistrement") {
+                    Picker("Duree", selection: $limitRaw) {
+                        ForEach(RecordingLimit.allCases) { value in
+                            Text(value.label).tag(value.rawValue)
+                        }
+                    }
+                    .onChange(of: limitRaw) { _ in applySettings() }
+
+                    if limit == .custom {
+                        HStack {
+                            TextField("", value: $customMinutes, formatter: minutesFormatter)
+                                .frame(width: 60)
+                                .multilineTextAlignment(.trailing)
+                                .onChange(of: customMinutes) { _ in applySettings() }
+                            Text("minutes")
+                            Spacer()
+                        }
+                    }
+                    if limit != .unlimited {
+                        Text("L'enregistrement s'arrete tout seul et le fichier est "
+                             + "referme proprement. Le Mac est empeche de s'endormir "
+                             + "pendant ce temps.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Picker("Qualite", selection: $qualityRaw) {
                         ForEach(Quality.allCases) { quality in
                             Text(quality.label).tag(quality.rawValue)
@@ -240,6 +284,7 @@ struct ContentView: View {
         engine.quality = Quality(rawValue: qualityRaw) ?? .standard
         engine.deinterlace = deinterlace
         engine.audioDeviceIndex = audioIndex >= 0 ? audioIndex : nil
+        engine.recordingLimit = limit.seconds(customMinutes: customMinutes)
     }
 
     private func chooseFolder() {

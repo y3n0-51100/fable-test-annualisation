@@ -61,7 +61,7 @@ if [ -n "$audio" ]; then
     ff_args+=(-f avfoundation -i ":$audio" -c:a aac -b:a 192k)
 fi
 ff_args+=(-vf yadif=1 -c:v libx264 -crf "$crf" -preset slow -pix_fmt yuv420p
-          -aspect 4:3 -movflags +faststart -y "$output")
+          -aspect 4:3 -y "$output")
 
 echo "Enregistrement vers $output ($standard, $input) - Ctrl-C pour arreter."
 "$DVC100" "${dvc_args[@]}" | ffmpeg "${ff_args[@]}"

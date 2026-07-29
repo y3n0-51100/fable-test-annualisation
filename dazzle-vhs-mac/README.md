@@ -98,7 +98,11 @@ open build/VHSRecorder.app
    américaines ou japonaises).
 3. **Démarrer l'aperçu** → mettez le magnétoscope en lecture : l'image doit
    apparaître.
-4. **Enregistrer** → un fichier `Cassette_<date>.mp4` est créé dans le dossier
+4. **Durée** (facultatif) : 30 min à 4 h, ou une valeur libre en minutes.
+   L'enregistrement s'arrête alors seul, le fichier est refermé proprement et
+   la veille du Mac est bloquée pendant toute la durée — de quoi lancer une
+   cassette de 3 h et s'absenter. Le temps restant s'affiche sous l'image.
+5. **Enregistrer** → un fichier `Cassette_<date>.mp4` est créé dans le dossier
    choisi (Séquences par défaut).
 
 L'aperçu et l'enregistrement partagent le même flux : l'image affichée est
