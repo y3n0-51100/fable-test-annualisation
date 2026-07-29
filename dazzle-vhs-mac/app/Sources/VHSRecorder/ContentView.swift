@@ -64,10 +64,15 @@ struct ContentView: View {
         }
     }
 
+    private var statusColor: Color {
+        if engine.isRecording { return Color.red }
+        return engine.isStreaming ? Color.green : Color.gray
+    }
+
     private var statusBar: some View {
         HStack(spacing: 16) {
             Circle()
-                .fill(engine.isRecording ? .red : (engine.isStreaming ? .green : .gray))
+                .fill(statusColor)
                 .frame(width: 10, height: 10)
             Text(engine.status)
                 .lineLimit(1)
@@ -92,8 +97,8 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(engine.log.enumerated()), id: \.offset) { index, line in
-                        Text(line)
+                    ForEach(engine.log.indices, id: \.self) { index in
+                        Text(engine.log[index])
                             .font(.system(size: 11, design: .monospaced))
                             .textSelection(.enabled)
                             .id(index)
@@ -180,7 +185,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .controlSize(.large)
-                    .tint(engine.isRecording ? .red : .accentColor)
+                    .tint(engine.isRecording ? Color.red : Color.accentColor)
 
                     if engine.recordedURL != nil && !engine.isRecording {
                         Button("Afficher le fichier dans le Finder") {

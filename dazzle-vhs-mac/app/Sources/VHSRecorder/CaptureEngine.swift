@@ -71,7 +71,8 @@ struct AudioDevice: Identifiable, Hashable {
 
 /// Holds the pipe to ffmpeg. Frames are written from the USB reader thread —
 /// never from the main thread, where a full pipe would freeze the interface.
-final class FrameSink: @unchecked Sendable {
+/// Hence the lock: two threads look at `handle`.
+final class FrameSink {
     private let lock = NSLock()
     private var handle: FileHandle?
     private(set) var lastError: String?
@@ -114,7 +115,10 @@ final class FrameSink: @unchecked Sendable {
 
 /// Drives the `dvc100` capture process, renders a live preview, and pipes the
 /// same frames into ffmpeg while recording. One USB reader, two consumers.
-@MainActor
+///
+/// Everything except the frame reader runs on the main thread, and results
+/// come back through DispatchQueue.main rather than Swift concurrency, so the
+/// app builds with any Swift 5 toolchain.
 final class CaptureEngine: ObservableObject {
 
     @Published private(set) var previewImage: CGImage?
@@ -235,14 +239,19 @@ final class CaptureEngine: ObservableObject {
         proc.standardOutput = out
         proc.standardError = err
 
+        // Both handlers fire on background threads: hop to the main thread
+        // before touching anything the interface observes.
         err.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { @MainActor in self?.appendLog(text) }
+            guard !data.isEmpty,
+                  let text = String(data: data, encoding: .utf8),
+                  let engine = self else { return }
+            DispatchQueue.main.async { engine.appendLog(text) }
         }
 
         proc.terminationHandler = { [weak self] _ in
-            Task { @MainActor in self?.handleCaptureExit() }
+            guard let engine = self else { return }
+            DispatchQueue.main.async { engine.handleCaptureExit() }
         }
 
         do {
@@ -267,8 +276,10 @@ final class CaptureEngine: ObservableObject {
         readerThread = thread
         thread.start()
 
+        // Scheduled on the main run loop, so tick() is already on the main
+        // thread when it fires.
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+            self?.tick()
         }
     }
 
@@ -350,8 +361,10 @@ final class CaptureEngine: ObservableObject {
         proc.standardError = err
         err.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { @MainActor in self?.appendLog("ffmpeg: " + text) }
+            guard !data.isEmpty,
+                  let text = String(data: data, encoding: .utf8),
+                  let engine = self else { return }
+            DispatchQueue.main.async { engine.appendLog("ffmpeg: " + text) }
         }
 
         do {
@@ -390,7 +403,8 @@ final class CaptureEngine: ObservableObject {
 
     // MARK: Frame plumbing (background thread)
 
-    private nonisolated func readLoop(fd: Int32, frameSize: Int, width: Int, height: Int) {
+    /// Runs on its own thread for the whole capture session.
+    private func readLoop(fd: Int32, frameSize: Int, width: Int, height: Int) {
         var buffer = [UInt8](repeating: 0, count: frameSize)
         var counter: UInt64 = 0
 
@@ -413,16 +427,16 @@ final class CaptureEngine: ObservableObject {
             // pipe, which is exactly the back-pressure we want on the USB side.
             if sink.isOpen && !sink.write(frame) {
                 let reason = sink.lastError ?? "pipe ferme"
-                Task { @MainActor [weak self] in
+                DispatchQueue.main.async { [weak self] in
                     self?.appendLog("ecriture ffmpeg interrompue : \(reason)")
                     self?.stopRecording()
                 }
             }
 
             // Preview at half rate; it is only there to check tracking and
-            // colour, and every hop to the main actor costs a redraw.
+            // colour, and every hop to the main thread costs a redraw.
             if counter % 2 == 0 {
-                Task { @MainActor [weak self] in
+                DispatchQueue.main.async { [weak self] in
                     self?.handleFrame(frame, width: width, height: height, framesRead: 2)
                 }
             }
